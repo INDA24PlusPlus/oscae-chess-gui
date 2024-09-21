@@ -18,8 +18,10 @@ fn main() {
     let black_pieces: Vec<&str> = vec![ "bR1", "bK1", "bB1", "bKI", "bQU", "bB2", "bK2", "bR2", "bP1", "bP2", "bP3", "bP4", "bP5", "bP6", "bP7", "bP8" ];
 
     // Content
-    let white_piece_path = String::from("assets/Classic/Pieces/Chess - white classic/");
-    let black_piece_path = String::from("assets/Classic/Pieces/Chess - black classic/");
+    let board = rl.load_texture(&thread, "assets/Classic/Board/Board - classic 2.png").unwrap();
+
+    let white_piece_path = String::from("assets/Classic/Pieces/White/");
+    let black_piece_path = String::from("assets/Classic/Pieces/Black/");
     let white_king = rl.load_texture(&thread, format!("{}{}", &white_piece_path, "King.png").as_str()).unwrap();
     let white_queen = rl.load_texture(&thread, format!("{}{}", &white_piece_path, "Queen.png").as_str()).unwrap();
     let white_bishop = rl.load_texture(&thread, format!("{}{}", &white_piece_path, "Bishop.png").as_str()).unwrap();
@@ -33,20 +35,26 @@ fn main() {
     let black_knight = rl.load_texture(&thread, format!("{}{}", &black_piece_path, "Knight.png").as_str()).unwrap();
     let black_rook = rl.load_texture(&thread, format!("{}{}", &black_piece_path, "Rook.png").as_str()).unwrap();
     let black_pawn = rl.load_texture(&thread, format!("{}{}", &black_piece_path, "Pawn.png").as_str()).unwrap();
+
+
     
     let mut textures = HashMap::<&str, Texture2D>::new();
     //textures.insert(white_pieces[], white_king);
 
     while !rl.window_should_close() {
         
-        // Update
+        // ------- Update ----------------------------------------
         let mouse_x = rl.get_mouse_x();
         let mouse_y = rl.get_mouse_y();
         
 
-        // Draw
+        // ------- Draw ------------------------------------------
         let mut d = rl.begin_drawing(&thread);
         d.clear_background(Color::CORNFLOWERBLUE);
+        // board
+        d.draw_texture_pro(&board, Rectangle::new(0.0, 0.0, 288.0, 288.0), Rectangle::new(360.0, 360.0, 720.0, 720.0), Vector2::new(360.0, 360.0), 0.0, Color::WHITE);
+        
+        
         d.draw_circle(mouse_x, mouse_y, 5.0, Color::RED);
     }
 }
