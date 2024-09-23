@@ -1,10 +1,8 @@
 //! Basic hello world example.
 
-use angun_chess::*;
-use other_functions::*;
+use oscae_chess::*;
 
 use raylib::prelude::*;
-use valid_moves::solves_check_move;
 
 const BOARD_SIZE: usize = 8;
 
@@ -20,8 +18,7 @@ fn main() {
     rl.set_target_fps(60);
 
     // Init
-    let mut chess_eninge = ChessEngine::new();
-    
+    let mut game = Game::new();
 
     // Content
     let mut assets = ChessAssets::new(&mut rl, &thread, 2, 2);
@@ -31,15 +28,15 @@ fn main() {
     let mut notification = String::new();
     let mut notification_time = 0.0;
 
-    let mut positions = Vec::<(i32, i32)>::new();
-    let mut selected_piece = String::new();
+    let mut positions = Vec::<Square>::new();
+    let mut selected_square = Square::from((-1, -1));
 
     while !rl.window_should_close() {
         
         // ------- Update ----------------------------------------
 
 
-
+        // gui logic
         let window_width = rl.get_screen_width() as f32;
         let window_height = rl.get_screen_height() as f32;
 
@@ -83,24 +80,21 @@ fn main() {
         let square_x = ((mouse_x - board_offset) / scale / asset_square_size).floor();
         let square_y = ((mouse_y - board_offset) / scale / asset_square_size).floor();
 
+        // chess logic
         if square_x >= 0.0 && square_x <= 7.0 && square_y >= 0.0 && square_y <= 7.0 {
             if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
-                let square = (square_x as i32, square_y as i32);
+                let square = Square::from((square_x as i8, 7 - square_y as i8));
                 if positions.contains(&square) {
-                    chess_eninge.do_move(&selected_piece, square);
+                    game.do_move(&selected_square, &square);
                     positions.clear();
-                    selected_piece.clear();
+                    selected_square = Square::from((-1, -1));
                 } else {
-                    positions.clear();
-                    selected_piece = chess_eninge.get_piece(square);
-                    for pos in chess_eninge.get_valid_moves(&selected_piece) {
-                        let index = letter_to_index(&pos);
-                        positions.push((index.1, index.0));
-                    }
+                    selected_square = square;
+                    positions = game.get_moves_list(&square);
                 }
-
             }
         }
+
         // ------- Draw ------------------------------------------
         let mut d = rl.begin_drawing(&thread);
         d.clear_background(Color::CORNFLOWERBLUE);
@@ -112,47 +106,53 @@ fn main() {
             Vector2::new(board_size / 2.0, board_size / 2.0), rotation, Color::WHITE);
         
         // pieces
-        for y in 0..8 {
-            for x in 0..8 {
-                let piece_asset = match chess_eninge.board[y][x].as_str() {
-                    "wKI" => &assets.white_king,
-                    "wQU" => &assets.white_queen,
-                    "wB1" | "wB2" => &assets.white_bishop,
-                    "wK1" | "wK2" => &assets.white_knight,
-                    "wR1" | "wR2" => &assets.white_rook,
-                    "wP1" | "wP2" | "wP3" | "wP4" | "wP5" | "wP6" | "wP7" | "wP8" => &assets.white_pawn,
-                    "bKI" => &assets.black_king,
-                    "bQU" => &assets.black_queen,
-                    "bB1" | "bB2" => &assets.black_bishop,
-                    "bK1" | "bK2" => &assets.black_knight,
-                    "bR1" | "bR2" => &assets.black_rook,
-                    "bP1" | "bP2" | "bP3" | "bP4" | "bP5" | "bP6" | "bP7" | "bP8" => &assets.black_pawn,
-                    _ => continue,
-                };
-                
-                let source_rec = Rectangle::new(0.0, 0.0, asset_square_size, asset_square_size);
-                d.draw_texture_pro(piece_asset, source_rec,
-                    Rectangle::new(
-                        window_width / 2.0 + board_square_size * (x as f32 - 3.5),
-                        window_height / 2.0 + board_square_size * (y as f32 - 3.5),
-                        board_square_size, board_square_size),
-                    Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
-            }
+        for (square, piece) in game.get_board_state() {
+
+            let piece_asset = match piece.color {
+                PieceColor::White => {
+                    match piece.piece_type {
+                        PieceType::King => &assets.white_king,
+                        PieceType::Queen => &assets.white_queen,
+                        PieceType::Bishop => &assets.white_bishop,
+                        PieceType::Knight => &assets.white_knight,
+                        PieceType::Rook => &assets.white_rook,
+                        PieceType::Pawn => &assets.white_pawn,
+                    }
+                },
+                PieceColor::Black => {
+                    match piece.piece_type {
+                        PieceType::King => &assets.black_king,
+                        PieceType::Queen => &assets.black_queen,
+                        PieceType::Bishop => &assets.black_bishop,
+                        PieceType::Knight => &assets.black_knight,
+                        PieceType::Rook => &assets.black_rook,
+                        PieceType::Pawn => &assets.black_pawn,
+                    }
+                },
+            };
+
+            let source_rec = Rectangle::new(0.0, 0.0, asset_square_size, asset_square_size);
+            d.draw_texture_pro(piece_asset, source_rec,
+                Rectangle::new(
+                    window_width / 2.0 + board_square_size * (square.x as f32 - 3.5),
+                    window_height / 2.0 + board_square_size * ( 7.0 - square.y as f32 - 3.5),
+                    board_square_size, board_square_size),
+                Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
         }
         
         // positions
-        for pos in &positions {
-            let pos_texture = if chess_eninge.board[pos.1 as usize][pos.0 as usize] == "   " {
-                &dot
-            } else {
+        for square in &positions {
+            let pos_texture = if game.get_board_state().contains_key(square) {
                 &circle
+            } else {
+                &dot
             };
 
             let source_rec = Rectangle::new(0.0, 0.0, asset_square_size, asset_square_size);
             d.draw_texture_pro(pos_texture, source_rec,
                 Rectangle::new(
-                    window_width / 2.0 + board_square_size * (pos.0 as f32 - 3.5),
-                    window_height / 2.0 + board_square_size * (pos.1 as f32 - 3.5),
+                    window_width / 2.0 + board_square_size * (square.x as f32 - 3.5),
+                    window_height / 2.0 + board_square_size * (7.0 - square.y as f32 - 3.5),
                     board_square_size, board_square_size),
                 Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::new(128, 128, 128, 128));
         }
@@ -256,105 +256,5 @@ impl ChessAssets {
 
     fn next_theme(&self, rl: &mut RaylibHandle, thread: &RaylibThread) -> Self {
         Self::new(rl, thread, self.theme + 1, self.board_type)
-    }
-}
-
-
-struct ChessEngine {
-    board: Vec<Vec<String>>,
-    whites_turn_to_move: bool,
-}
-
-impl ChessEngine {
-    fn new() -> Self {
-        // Create pieces
-        let black_pieces: Vec<&str> = vec![
-            "bR1", "bK1", "bB1", "bQU", "bKI", "bB2", "bK2", "bR2", 
-            "bP1", "bP2", "bP3", "bP4", "bP5", "bP6", "bP7", "bP8"
-        ];
-        
-        let white_pieces: Vec<&str> = vec![
-            "wR1", "wK1", "wB1", "wQU", "wKI", "wB2", "wK2", "wR2", 
-            "wP1", "wP2", "wP3", "wP4", "wP5", "wP6", "wP7", "wP8"
-        ];
-
-        // Set turn order
-        let whites_turn_to_move = true;
-
-        // Initilize board
-        let mut board: Vec<Vec<String>> = vec![vec!["   ".to_string(); BOARD_SIZE]; BOARD_SIZE];
-        for i in 0..8{
-            board[0][i] = black_pieces.get(i)
-            .expect("Piece at index {i} does not exist in white_pieces").to_string();
-            board[1][i] = black_pieces.get(i + 8)
-            .expect("Piece at index {i} does not exist in white_pieces").to_string();
-        }
-
-        for i in 0..8{
-            board[7][i] = white_pieces.get(i)
-            .expect("Piece at index {i} does not exist in white_pieces").to_string();
-            board[6][i] = white_pieces.get(i + 8)
-            .expect("Piece at index {i} does not exist in white_pieces").to_string();
-        }
-
-        Self {
-            board,
-            whites_turn_to_move,
-        }
-    }
-
-    fn get_valid_pieces(&self) -> Vec<String> {
-        //Checking which pieces can be moved
-        
-        let is_in_check = valid_moves::is_in_check(if self.whites_turn_to_move { "wKI" } else { "bKI" }, &self.board);
-
-        valid_pieces(self.whites_turn_to_move, &self.board, is_in_check)
-    }
-
-    fn get_valid_moves(&self, piece_to_move: &String) -> Vec<String> {
-
-        let avaliable_pieces = self.get_valid_pieces();
-        
-        let is_in_check = valid_moves::is_in_check(if self.whites_turn_to_move { "wKI" } else { "bKI" }, &self.board);
-        
-        if !avaliable_pieces.contains(piece_to_move) {
-            return Vec::new();
-        }
-
-        //If check -> filter out positions that do not solve check
-        let moves = valid_moves(piece_to_move.as_str(), &self.board);
-
-        if is_in_check {
-            moves.iter().filter(|m| solves_check_move(piece_to_move, &self.board, m.to_string())).cloned().collect::<Vec<String>>()
-        } else {
-            moves
-        }
-    }
-
-    fn do_move(&mut self, piece: &String, to: (i32, i32)) -> bool {
-        let to = index_to_letter((to.1, to.0));
-
-        println!("{}", to);
-        
-        let valid_moves = self.get_valid_moves(piece);
-        if !valid_moves.contains(&to) {
-            return false;
-        }
-
-        //Moving piece
-        let move_from = get_position_index(piece, &self.board);
-        let move_to = letter_to_index(to.as_str());
-        self.board[move_from.0 as usize][move_from.1 as usize] = "   ".to_string();
-        self.board[move_to.0 as usize][move_to.1 as usize] = piece.clone();    
-    
-    
-        //Change turns
-        self.whites_turn_to_move = !self.whites_turn_to_move;
-
-        true
-    }
-
-    fn get_piece(&self, (x, y): (i32, i32)) -> String {
-        self.board[y as usize][x as usize].clone()
     }
 }

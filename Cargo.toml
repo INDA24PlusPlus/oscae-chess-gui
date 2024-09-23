@@ -4,6 +4,5 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-angun-chess = { git = "https://github.com/INDA24PlusPlus/angun-chess" }
-#ggez = "0.9.3"
+oscae-chess = { git = "https://github.com/INDA24PlusPlus/oscae-chess.git" }
 raylib = "5.0.2"
