@@ -4,8 +4,6 @@ use oscae_chess::*;
 
 use raylib::prelude::*;
 
-const BOARD_SIZE: usize = 8;
-
 fn main() {
     //run_chess();
 
@@ -21,7 +19,7 @@ fn main() {
     let mut game = Game::new();
 
     // Content
-    let mut assets = ChessAssets::new(&mut rl, &thread, 2, 2);
+    let mut assets = ChessAssets::new(&mut rl, &thread, 2, 3);
     let circle = rl.load_texture(&thread, "assets/Circle.png").unwrap();
     let dot = rl.load_texture(&thread, "assets/Dot.png").unwrap();
     
