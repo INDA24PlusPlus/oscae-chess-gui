@@ -78,8 +78,8 @@ fn main() {
         }
 
 
-        let square_x = ((mouse_x - board_left) / board_square_size).floor();
-        let square_y = ((mouse_y - board_top) / board_square_size).floor();
+        let square_x = mirror((mouse_x - board_left) / board_square_size, rotated).floor();
+        let square_y = mirror((mouse_y - board_top) / board_square_size, rotated).floor();
 
         // chess logic
         if square_x >= 0.0 && square_x <= 7.0 && square_y >= 0.0 && square_y <= 7.0 {
@@ -267,6 +267,14 @@ fn main() {
                 ((topleft_y + 4.0) * scale) as i32,
                 font_size, Color::from(Color::BLACK))
         }
+    }
+}
+
+fn mirror(i: f32, mirror: bool) -> f32 {
+    if mirror {
+        7.0 - i
+    } else {
+        i
     }
 }
 
