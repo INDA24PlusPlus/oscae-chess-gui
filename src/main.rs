@@ -34,28 +34,28 @@ fn main() {
     while !rl.window_should_close() {
         
         // ------- Update ----------------------------------------
-
-
+        
         // gui logic
         let window_width = rl.get_screen_width() as f32;
         let window_height = rl.get_screen_height() as f32;
-
+        
         let rotated = false;
-
+        
         let asset_size = assets.size as f32;
         let asset_square_size = assets.square_size as f32;
         let asset_square_offset = assets.square_offset as f32;
-
+        
         let scale = if window_width > window_height { window_height / asset_size } else { window_width / asset_size };
-
+        
         let mouse_x = rl.get_mouse_x() as f32;
         let mouse_y = rl.get_mouse_y() as f32;
         let rotation = match rotated { true => 180.0, false => 0.0 };
         let board_size = if window_width > window_height { window_height } else { window_width };
-
+        
         let board_square_size = asset_square_size * scale;
         let board_offset = asset_square_offset * scale;
 
+        
         let window_height = if rl.is_key_released(KeyboardKey::KEY_R) {
             rl.set_window_size(window_width as i32, window_width as i32);
             window_width
@@ -63,6 +63,9 @@ fn main() {
         else {
             window_height
         };
+        
+        let board_left = (window_width - board_size) / 2.0 + board_offset;
+        let board_top = (window_height - board_size) / 2.0 + board_offset;
 
         //let fps = rl.get_fps();
         
@@ -77,27 +80,52 @@ fn main() {
         }
 
 
-        let square_x = ((mouse_x - board_offset) / scale / asset_square_size).floor();
-        let square_y = ((mouse_y - board_offset) / scale / asset_square_size).floor();
+        let square_x = ((mouse_x - board_left) / board_square_size).floor();
+        let square_y = ((mouse_y - board_top) / board_square_size).floor();
 
         // chess logic
         if square_x >= 0.0 && square_x <= 7.0 && square_y >= 0.0 && square_y <= 7.0 {
             if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
+
                 let square = Square::from((square_x as i8, 7 - square_y as i8));
-                if positions.contains(&square) {
-                    game.do_move(&selected_square, &square);
-                    positions.clear();
-                    selected_square = Square::from((-1, -1));
-                } else {
-                    selected_square = square;
-                    positions = game.get_moves_list(&square);
+                if !game.promotion {
+                    if positions.contains(&square) {
+                        game.do_move(&selected_square, &square);
+                        positions.clear();
+                        selected_square = Square::from((-1, -1));
+                    } else {
+                        selected_square = square;
+                        positions = game.get_moves_list(&square);
+                    }
+                }
+                else { // promotion
+                    if square.x == game.last_moved_to.x {
+
+                        let distance_to_pawn = if game.last_moved_to.y > square.y {
+                            game.last_moved_to.y - square.y
+                        } else {
+                            square.y - game.last_moved_to.y
+                        };
+
+                        if square.y <= match game.last_moved_to.y { 0 => 4, 7 => 6, _ => -1 } &&
+                            square.y >= match game.last_moved_to.y { 0 => 1, 7 => 3, _ => 100 } {
+
+                            _ = match distance_to_pawn { // returns true if successful (play sound?)
+                                1 => game.pawn_promotion(PieceType::Queen),
+                                2 => game.pawn_promotion(PieceType::Rook),
+                                3 => game.pawn_promotion(PieceType::Bishop),
+                                4 => game.pawn_promotion(PieceType::Knight),
+                                _ => false,
+                            };
+                        }
+                    }
                 }
             }
         }
 
         // ------- Draw ------------------------------------------
         let mut d = rl.begin_drawing(&thread);
-        d.clear_background(Color::CORNFLOWERBLUE);
+        d.clear_background(Color::BLACK);
 
         // board
         d.draw_texture_pro(&assets.board,
@@ -134,8 +162,8 @@ fn main() {
             let source_rec = Rectangle::new(0.0, 0.0, asset_square_size, asset_square_size);
             d.draw_texture_pro(piece_asset, source_rec,
                 Rectangle::new(
-                    window_width / 2.0 + board_square_size * (square.x as f32 - 3.5),
-                    window_height / 2.0 + board_square_size * ( 7.0 - square.y as f32 - 3.5),
+                    board_left + board_square_size * (square.x as f32 + 0.5),
+                    board_top + board_square_size * ( 7.0 - square.y as f32 + 0.5),
                     board_square_size, board_square_size),
                 Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
         }
@@ -151,19 +179,74 @@ fn main() {
             let source_rec = Rectangle::new(0.0, 0.0, asset_square_size, asset_square_size);
             d.draw_texture_pro(pos_texture, source_rec,
                 Rectangle::new(
-                    window_width / 2.0 + board_square_size * (square.x as f32 - 3.5),
-                    window_height / 2.0 + board_square_size * (7.0 - square.y as f32 - 3.5),
+                    board_left + board_square_size * (square.x as f32 + 0.5),
+                    board_top + board_square_size * (7.0 - square.y as f32 + 0.5),
                     board_square_size, board_square_size),
                 Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::new(128, 128, 128, 128));
+        }
+
+        // promotion
+        if game.promotion {
+            let (y, inc) = match game.last_moved_to.y {
+                7 => (6, -1),
+                0 => (4, 1),
+                _ => (100, 0), // this should never happen
+            };
+
+            // draw outline
+            d.draw_texture_pro(&assets.board, Rectangle::new(
+                (assets.square_offset + assets.square_size) as f32,
+                assets.square_offset as f32, 1.0, 1.0),
+                Rectangle::new(
+                    board_left + board_square_size * (game.last_moved_to.x as f32 + 0.5) - scale * 2.0,
+                    board_top + board_square_size * (7.0 - y as f32 + 0.5) - scale * 2.0,
+                    board_square_size + scale * 4.0, board_square_size * 4.0 + scale * 4.0),
+                Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
+
+            // draw inside outline
+            d.draw_texture_pro(&assets.board, Rectangle::new(
+                assets.square_offset as f32,
+                assets.square_offset as f32, 1.0, 1.0),
+                Rectangle::new(
+                    board_left + board_square_size * (game.last_moved_to.x as f32 + 0.5),
+                    board_top + board_square_size * (7.0 - y as f32 + 0.5),
+                    board_square_size, board_square_size * 4.0),
+                Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
+
+            // draw inside
+            d.draw_texture_pro(&assets.board, Rectangle::new(
+                (assets.square_offset + 2) as f32,
+                (assets.square_offset + 2) as f32, 1.0, 1.0),
+                Rectangle::new(
+                    board_left + board_square_size * (game.last_moved_to.x as f32 + 0.5) + scale * 2.0,
+                    board_top + board_square_size * (7.0 - y as f32 + 0.5) + scale * 2.0,
+                    board_square_size - scale * 4.0, board_square_size * 4.0 - scale * 4.0),
+                Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
+
+            // draw pieces
+            let textures: [(&Texture2D, f32); 4] = match game.turn {
+                PieceColor::White => [(&assets.white_queen, 1.0), (&assets.white_rook, 2.0), (&assets.white_bishop, 3.0), (&assets.white_knight, 4.0)],
+                PieceColor::Black => [(&assets.black_queen, 6.0), (&assets.black_rook, 5.0), (&assets.black_bishop, 4.0), (&assets.black_knight, 3.0)],
+            };
+            let source_rec = Rectangle::new(0.0, 0.0, asset_square_size, asset_square_size);
+
+            for (piece_texture, y) in textures {
+                d.draw_texture_pro(piece_texture, source_rec,
+                    Rectangle::new(
+                        board_left + board_square_size * (game.last_moved_to.x as f32 + 0.5),
+                        board_top + board_square_size * (y + 0.5),
+                        board_square_size, board_square_size),
+                    Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
+            }
         }
 
         // cursor
         if d.is_cursor_on_screen() {
             // highlight
-            if mouse_x > board_offset && mouse_x < board_offset + 8.0 * board_square_size &&
-                mouse_y > board_offset && mouse_y < board_offset + 8.0 * board_square_size {
+            if square_x >= 0.0 && square_x <= 7.0 &&
+            square_y >= 0.0 && square_y <= 7.0 {
 
-                d.draw_rectangle_rec(Rectangle::new(square_x * board_square_size + board_offset, square_y * board_square_size + board_offset, board_square_size, board_square_size), Color::new(150, 150, 150, 100));
+                d.draw_rectangle_rec(Rectangle::new(board_left + square_x * board_square_size, board_top + square_y * board_square_size, board_square_size, board_square_size), Color::new(150, 150, 150, 100));
             }
 
             // cursor
