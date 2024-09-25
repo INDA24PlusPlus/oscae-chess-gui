@@ -28,6 +28,7 @@ fn main() {
 
     let mut positions = Vec::<Square>::new();
     let mut selected_square = Square::from((-1, -1));
+    let mut rotated = false;
 
     while !rl.window_should_close() {
         
@@ -37,7 +38,6 @@ fn main() {
         let window_width = rl.get_screen_width() as f32;
         let window_height = rl.get_screen_height() as f32;
         
-        let rotated = false;
         
         let asset_size = assets.size as f32;
         let asset_square_size = assets.square_size as f32;
@@ -77,15 +77,19 @@ fn main() {
             notification_time = 1.0;
         }
 
+        if rl.is_key_pressed(KeyboardKey::KEY_F) {
+            rotated = !rotated;
+        }
 
-        let square_x = mirror((mouse_x - board_left) / board_square_size, rotated).floor();
-        let square_y = mirror((mouse_y - board_top) / board_square_size, rotated).floor();
+
+        let square_x = ((mouse_x - board_left) / board_square_size).floor();
+        let square_y = ((mouse_y - board_top) / board_square_size).floor();
 
         // chess logic
         if square_x >= 0.0 && square_x <= 7.0 && square_y >= 0.0 && square_y <= 7.0 {
             if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
 
-                let square = Square::from((square_x as i8, 7 - square_y as i8));
+                let square = Square::from((mirror(square_x as i8, rotated), mirror(square_y as i8, !rotated)));
                 if !game.promotion {
                     if positions.contains(&square) {
                         game.do_move(&selected_square, &square);
@@ -160,8 +164,8 @@ fn main() {
             let source_rec = Rectangle::new(0.0, 0.0, asset_square_size, asset_square_size);
             d.draw_texture_pro(piece_asset, source_rec,
                 Rectangle::new(
-                    board_left + board_square_size * (square.x as f32 + 0.5),
-                    board_top + board_square_size * ( 7.0 - square.y as f32 + 0.5),
+                    board_left + board_square_size * (mirror(square.x, rotated) as f32 + 0.5),
+                    board_top + board_square_size * (mirror(square.y, !rotated) as f32 + 0.5),
                     board_square_size, board_square_size),
                 Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
         }
@@ -177,18 +181,18 @@ fn main() {
             let source_rec = Rectangle::new(0.0, 0.0, asset_square_size, asset_square_size);
             d.draw_texture_pro(pos_texture, source_rec,
                 Rectangle::new(
-                    board_left + board_square_size * (square.x as f32 + 0.5),
-                    board_top + board_square_size * (7.0 - square.y as f32 + 0.5),
+                    board_left + board_square_size * (mirror(square.x, rotated) as f32 + 0.5),
+                    board_top + board_square_size * (mirror(square.y, !rotated) as f32 + 0.5),
                     board_square_size, board_square_size),
                 Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::new(128, 128, 128, 128));
         }
 
         // promotion
         if game.promotion {
-            let (y, inc) = match game.last_moved_to.y {
-                7 => (6, -1),
-                0 => (4, 1),
-                _ => (100, 0), // this should never happen
+            let y = match mirror(game.last_moved_to.y, rotated) {
+                7 => 6,
+                0 => 4,
+                _ => 100, // this should never happen
             };
 
             // draw outline
@@ -196,8 +200,8 @@ fn main() {
                 (assets.square_offset + assets.square_size) as f32,
                 assets.square_offset as f32, 1.0, 1.0),
                 Rectangle::new(
-                    board_left + board_square_size * (game.last_moved_to.x as f32 + 0.5) - scale * 2.0,
-                    board_top + board_square_size * (7.0 - y as f32 + 0.5) - scale * 2.0,
+                    board_left + board_square_size * (mirror(game.last_moved_to.x, rotated) as f32 + 0.5) - scale * 2.0,
+                    board_top + board_square_size * (mirror(y, true) as f32 + 0.5) - scale * 2.0,
                     board_square_size + scale * 4.0, board_square_size * 4.0 + scale * 4.0),
                 Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
 
@@ -206,8 +210,8 @@ fn main() {
                 assets.square_offset as f32,
                 assets.square_offset as f32, 1.0, 1.0),
                 Rectangle::new(
-                    board_left + board_square_size * (game.last_moved_to.x as f32 + 0.5),
-                    board_top + board_square_size * (7.0 - y as f32 + 0.5),
+                    board_left + board_square_size * (mirror(game.last_moved_to.x, rotated) as f32 + 0.5),
+                    board_top + board_square_size * (mirror(y, true) as f32 + 0.5),
                     board_square_size, board_square_size * 4.0),
                 Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
 
@@ -216,23 +220,23 @@ fn main() {
                 (assets.square_offset + 2) as f32,
                 (assets.square_offset + 2) as f32, 1.0, 1.0),
                 Rectangle::new(
-                    board_left + board_square_size * (game.last_moved_to.x as f32 + 0.5) + scale * 2.0,
-                    board_top + board_square_size * (7.0 - y as f32 + 0.5) + scale * 2.0,
+                    board_left + board_square_size * (mirror(game.last_moved_to.x, rotated) as f32 + 0.5) + scale * 2.0,
+                    board_top + board_square_size * (mirror(y, true) as f32 + 0.5) + scale * 2.0,
                     board_square_size - scale * 4.0, board_square_size * 4.0 - scale * 4.0),
                 Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
 
             // draw pieces
-            let textures: [(&Texture2D, f32); 4] = match game.turn {
-                PieceColor::White => [(&assets.white_queen, 1.0), (&assets.white_rook, 2.0), (&assets.white_bishop, 3.0), (&assets.white_knight, 4.0)],
-                PieceColor::Black => [(&assets.black_queen, 6.0), (&assets.black_rook, 5.0), (&assets.black_bishop, 4.0), (&assets.black_knight, 3.0)],
+            let textures: [(&Texture2D, i8); 4] = match game.turn {
+                PieceColor::White => [(&assets.white_queen, 1), (&assets.white_rook, 2), (&assets.white_bishop, 3), (&assets.white_knight, 4)],
+                PieceColor::Black => [(&assets.black_queen, 6), (&assets.black_rook, 5), (&assets.black_bishop, 4), (&assets.black_knight, 3)],
             };
             let source_rec = Rectangle::new(0.0, 0.0, asset_square_size, asset_square_size);
 
             for (piece_texture, y) in textures {
                 d.draw_texture_pro(piece_texture, source_rec,
                     Rectangle::new(
-                        board_left + board_square_size * (game.last_moved_to.x as f32 + 0.5),
-                        board_top + board_square_size * (y + 0.5),
+                        board_left + board_square_size * (mirror(game.last_moved_to.x, rotated) as f32 + 0.5),
+                        board_top + board_square_size * (mirror(y, rotated) as f32 + 0.5),
                         board_square_size, board_square_size),
                     Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
             }
@@ -248,7 +252,7 @@ fn main() {
             }
 
             // cursor
-            d.draw_circle(mouse_x as i32, mouse_y as i32, 5.0, Color::RED);
+            //d.draw_circle(mouse_x as i32, mouse_y as i32, 5.0, Color::RED);
         }
 
         // notification
@@ -270,9 +274,9 @@ fn main() {
     }
 }
 
-fn mirror(i: f32, mirror: bool) -> f32 {
+fn mirror(i: i8, mirror: bool) -> i8 {
     if mirror {
-        7.0 - i
+        7 - i
     } else {
         i
     }
