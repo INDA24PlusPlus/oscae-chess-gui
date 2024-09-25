@@ -255,6 +255,20 @@ fn main() {
             //d.draw_circle(mouse_x as i32, mouse_y as i32, 5.0, Color::RED);
         }
 
+        // menu
+        if game.result != ChessResult::Ongoing {
+            let t = match game.result {
+                ChessResult::Ongoing => "",
+                ChessResult::WhiteWon => "White won",
+                ChessResult::BlackWon => "Black won",
+                ChessResult::Draw => "Draw",
+            };
+
+            let width = d.measure_text(t, (12.0 * scale) as i32);
+
+            //d.draw_text(t, (window_height / 2.0))
+        }
+
         // notification
         if notification_time > -1.0 {
 
