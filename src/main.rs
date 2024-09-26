@@ -30,6 +30,32 @@ fn main() {
     let mut selected_square = Square::from((-1, -1));
     let mut rotated = false;
 
+    let mut pre_game = true;
+    let mut pre_game_menu = UIBox {
+        x: 0.0,
+        y: 0.0,
+        text: String::from("oscae-chess-gui"),
+        font_size: 12,
+        text_color: Color::BLACK,
+        width: 120.0,
+        height: 60.0,
+        color: Color::LIGHTGRAY,
+        outline_color: Color::BLACK,
+        buttons: vec![UIButton { x: 0.0, y: 10.0, text: String::from("PLAY"), font_size: 20, text_color: Color::BLACK, width: 100.0, height: 30.0, color: Color::WHITE, outline_color: Color::DARKGRAY }],
+    };
+    let mut post_game_menu = UIBox {
+        x: 0.0,
+        y: 0.0,
+        text: String::new(),
+        font_size: 15,
+        text_color: Color::BLACK,
+        width: 120.0,
+        height: 60.0,
+        color: Color::LIGHTGRAY,
+        outline_color: Color::BLACK,
+        buttons: vec![UIButton { x: 0.0, y: 10.0, text: String::from("continue"), font_size: 20, text_color: Color::BLACK, width: 100.0, height: 30.0, color: Color::WHITE, outline_color: Color::DARKGRAY }],
+    };
+
     while !rl.window_should_close() {
         
         // ------- Update ----------------------------------------
@@ -61,6 +87,9 @@ fn main() {
         else {
             window_height
         };
+
+        let center_x = window_width / 2.0;
+        let center_y = window_height / 2.0;
         
         let board_left = (window_width - board_size) / 2.0 + board_offset;
         let board_top = (window_height - board_size) / 2.0 + board_offset;
@@ -85,42 +114,76 @@ fn main() {
         let square_x = ((mouse_x - board_left) / board_square_size).floor();
         let square_y = ((mouse_y - board_top) / board_square_size).floor();
 
-        // chess logic
-        if square_x >= 0.0 && square_x <= 7.0 && square_y >= 0.0 && square_y <= 7.0 {
-            if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
+        if pre_game {
+            for button in &mut pre_game_menu.buttons {
+                if button.is_hovered(Vector2::new(center_x + pre_game_menu.x, center_y + pre_game_menu.y), scale, mouse_x, mouse_y) {
 
-                let square = Square::from((mirror(square_x as i8, rotated), mirror(square_y as i8, !rotated)));
-                if !game.promotion {
-                    if positions.contains(&square) {
-                        game.do_move(&selected_square, &square);
-                        positions.clear();
-                        selected_square = Square::from((-1, -1));
-                    } else {
-                        selected_square = square;
-                        positions = game.get_moves_list(&square);
+                    button.color = Color::WHITE;
+
+                    if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
+                        pre_game = false;
                     }
                 }
-                else { // promotion
-                    if square.x == game.last_moved_to.x {
+                else {
+                    button.color = Color::LIGHTGRAY;
+                }
+            }
+        }
 
-                        let distance_to_pawn = if game.last_moved_to.y > square.y {
-                            game.last_moved_to.y - square.y
-                        } else {
-                            square.y - game.last_moved_to.y
-                        };
+        if game.result != ChessResult::Ongoing {
+            for button in &mut post_game_menu.buttons {
+                if button.is_hovered(Vector2::new(center_x + post_game_menu.x, center_y + post_game_menu.y), scale, mouse_x, mouse_y) {
 
-                        if square.y <= match game.last_moved_to.y { 0 => 4, 7 => 6, _ => -1 } &&
-                            square.y >= match game.last_moved_to.y { 0 => 1, 7 => 3, _ => 100 } {
+                    button.color = Color::WHITE;
 
-                            _ = match distance_to_pawn { // returns true if successful (play sound?)
-                                1 => game.pawn_promotion(PieceType::Queen),
-                                2 => game.pawn_promotion(PieceType::Rook),
-                                3 => game.pawn_promotion(PieceType::Bishop),
-                                4 => game.pawn_promotion(PieceType::Knight),
-                                _ => false,
-                            };
-                        }
+                    if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
+                        pre_game = true;
+                        game = Game::new();
                     }
+                }
+                else {
+                    button.color = Color::LIGHTGRAY;
+                }
+            }
+        }
+        
+
+        // chess logic
+        if !pre_game && square_x >= 0.0 && square_x <= 7.0 && square_y >= 0.0 && square_y <= 7.0 {
+            if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
+                
+            let square = Square::from((mirror(square_x as i8, rotated), mirror(square_y as i8, !rotated)));
+            if !game.promotion {
+                if positions.contains(&square) {
+                    game.do_move(&selected_square, &square);
+                    positions.clear();
+                    selected_square = Square::from((-1, -1));
+                } else {
+                    selected_square = square;
+                    positions = game.get_moves_list(&square);
+                }
+            }
+            else { // promotion
+                if square.x == game.last_moved_to.x {
+
+                    let distance_to_pawn = if game.last_moved_to.y > square.y {
+                        game.last_moved_to.y - square.y
+                    } else {
+                        square.y - game.last_moved_to.y
+                    };
+
+                    if square.y <= match game.last_moved_to.y { 0 => 4, 7 => 6, _ => -1 } &&
+                    square.y >= match game.last_moved_to.y { 0 => 1, 7 => 3, _ => 100 } {
+                        
+                        _ = match distance_to_pawn { // returns true if successful (play sound?)
+                            1 => game.pawn_promotion(PieceType::Queen),
+                            2 => game.pawn_promotion(PieceType::Rook),
+                            3 => game.pawn_promotion(PieceType::Bishop),
+                            4 => game.pawn_promotion(PieceType::Knight),
+                            _ => false,
+                        };
+                    }
+                }
                 }
             }
         }
@@ -132,7 +195,7 @@ fn main() {
         // board
         d.draw_texture_pro(&assets.board,
             Rectangle::new(0.0, 0.0, asset_size, asset_size),
-            Rectangle::new(window_width / 2.0, window_height / 2.0, board_size, board_size),
+            Rectangle::new(center_x, center_y, board_size, board_size),
             Vector2::new(board_size / 2.0, board_size / 2.0), rotation, Color::WHITE);
         
         // pieces
@@ -245,7 +308,7 @@ fn main() {
         // cursor
         if d.is_cursor_on_screen() {
             // highlight
-            if square_x >= 0.0 && square_x <= 7.0 &&
+            if !pre_game && square_x >= 0.0 && square_x <= 7.0 &&
             square_y >= 0.0 && square_y <= 7.0 {
 
                 d.draw_rectangle_rec(Rectangle::new(board_left + square_x * board_square_size, board_top + square_y * board_square_size, board_square_size, board_square_size), Color::new(150, 150, 150, 100));
@@ -256,6 +319,10 @@ fn main() {
         }
 
         // menu
+        if pre_game {
+            pre_game_menu.draw(&mut d, Vector2::new(center_x, center_y), scale);
+        }
+
         if game.result != ChessResult::Ongoing {
             let t = match game.result {
                 ChessResult::Ongoing => "",
@@ -264,9 +331,8 @@ fn main() {
                 ChessResult::Draw => "Draw",
             };
 
-            let width = d.measure_text(t, (12.0 * scale) as i32);
-
-            //d.draw_text(t, (window_height / 2.0))
+            post_game_menu.text = String::from(t);
+            post_game_menu.draw(&mut d, Vector2::new(center_x, center_y), scale);
         }
 
         // notification
@@ -363,5 +429,80 @@ impl ChessAssets {
 
     fn next_theme(&self, rl: &mut RaylibHandle, thread: &RaylibThread) -> Self {
         Self::new(rl, thread, self.theme + 1, self.board_type)
+    }
+}
+
+struct UIBox {
+    x: f32,
+    y: f32,
+
+    text: String,
+    font_size: i32,
+    text_color: Color,
+    width: f32,
+    height: f32,
+    color: Color,
+    outline_color: Color,
+    buttons: Vec<UIButton>
+}
+
+impl UIElement for UIBox {
+    fn draw(&self, d: &mut RaylibDrawHandle, origin: Vector2, scale: f32) {
+        d.draw_rectangle_rec(Rectangle::new(origin.x + (self.x - self.width / 2.0) * scale, origin.y + (self.y - self.height / 2.0) * scale, self.width * scale, self.height * scale), self.color);
+        d.draw_rectangle_lines_ex(Rectangle::new(origin.x + (self.x - self.width / 2.0) * scale, origin.y + (self.y - self.height / 2.0) * scale, self.width * scale, self.height * scale), scale * 2.0, self.outline_color);
+    
+        let text_width = d.measure_text(&self.text, self.font_size) as f32;
+
+        d.draw_text(&self.text,
+            (origin.x + (self.x - text_width / 2.0) * scale) as i32,
+            (origin.y + (self.y - self.height as f32 / 2.0) * scale) as i32,
+            (self.font_size as f32 * scale) as i32, self.text_color);
+
+        for button in &self.buttons {
+            button.draw(d, origin + Vector2::new(self.x, self.y), scale);
+        }
+    }
+}
+
+struct UIButton {
+    x: f32,
+    y: f32,
+
+    text: String,
+    font_size: i32,
+    text_color: Color,
+    width: f32,
+    height: f32,
+    color: Color,
+    outline_color: Color,
+}
+
+pub trait UIElement {
+    fn draw(&self, d: &mut RaylibDrawHandle, origin: Vector2, scale: f32);
+}
+
+impl UIElement for UIButton {
+    fn draw(&self, d: &mut RaylibDrawHandle, origin: Vector2, scale: f32) {
+        d.draw_rectangle_rec(Rectangle::new(origin.x + (self.x - self.width / 2.0) * scale, origin.y + (self.y - self.height / 2.0) * scale, self.width * scale, self.height * scale), self.color);
+        d.draw_rectangle_lines_ex(Rectangle::new(origin.x + (self.x - self.width / 2.0) * scale, origin.y + (self.y - self.height / 2.0) * scale, self.width * scale, self.height * scale), scale * 2.0, self.outline_color);
+        
+        let text_width = d.measure_text(&self.text, self.font_size) as f32;
+
+        d.draw_text(&self.text,
+            (origin.x + (self.x - text_width / 2.0) * scale) as i32,
+            (origin.y + (self.y - self.font_size as f32 / 2.0) * scale) as i32,
+            (self.font_size as f32 * scale) as i32, self.text_color);
+    }
+}
+
+impl UIButton {
+    fn is_hovered(&self, origin: Vector2, scale: f32, mouse_x: f32, mouse_y: f32) -> bool {
+        let left = origin.x + (self.x - self.width / 2.0) * scale;
+        let right = left + self.width * scale;
+
+        let top = origin.y + (self.y - self.height / 2.0) * scale;
+        let bottom = top + self.height * scale;
+        
+        left < mouse_x && mouse_x < right && top < mouse_y && mouse_y < bottom
     }
 }
