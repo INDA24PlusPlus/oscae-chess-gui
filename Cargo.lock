@@ -20,7 +20,7 @@ dependencies = [
 [[package]]
 name = "angun-chess"
 version = "0.1.0"
-source = "git+https://github.com/INDA24PlusPlus/angun-chess#6b03422f2b09080866c968d8ab181a39da9319cd"
+source = "git+https://github.com/INDA24PlusPlus/angun-chess#c56dd29485fe3b999f30ea5467bb99c37a47f951"
 
 [[package]]
 name = "arrayvec"
@@ -211,9 +211,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.158"
+version = "0.2.159"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8adc4bb1803a324070e64a98ae98f38934d91957a99cfb3a43dcbc01bc56439"
+checksum = "561d97a539a36e26a9a5fad1ea11a3039a67714694aaa379433e580854bc3dc5"
 
 [[package]]
 name = "libloading"
@@ -375,9 +375,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.5.4"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0884ad60e090bf1345b93da0a5de8923c93884cd03f40dfcfddd3b4bee661853"
+checksum = "355ae415ccd3a04315d3f8246e86d67689ea74d88d915576e1589a351062a13b"
 dependencies = [
  "bitflags",
 ]
