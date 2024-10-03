@@ -1,7 +1,9 @@
 //! Basic hello world example.
 
 use oscae_chess::*;
+use chess_networking::*;
 
+use std::{io::{Read, Write}, net::{TcpListener, TcpStream}};
 use raylib::prelude::*;
 
 fn main() {
@@ -11,6 +13,7 @@ fn main() {
         .size(720, 720)
         .title("oscae-chess-gui")
         .resizable()
+        .log_level(TraceLogLevel::LOG_WARNING)
         .build();
 
     rl.set_target_fps(60);
@@ -37,11 +40,15 @@ fn main() {
         text: String::from("oscae-chess-gui"),
         font_size: 12,
         text_color: Color::BLACK,
-        width: 120.0,
-        height: 60.0,
+        width: 160.0,
+        height: 120.0,
         color: Color::LIGHTGRAY,
         outline_color: Color::BLACK,
-        buttons: vec![UIButton { x: 0.0, y: 10.0, text: String::from("PLAY"), font_size: 20, text_color: Color::BLACK, width: 100.0, height: 30.0, color: Color::WHITE, outline_color: Color::DARKGRAY }],
+        buttons: vec![
+            UIButton { x: 0.0, y: -30.0, text: String::from("PLAY"), font_size: 20, text_color: Color::BLACK, width: 120.0, height: 30.0, color: Color::WHITE, outline_color: Color::DARKGRAY },
+            UIButton { x: 0.0, y: 4.0, text: String::from("HOST"), font_size: 20, text_color: Color::BLACK, width: 120.0, height: 30.0, color: Color::WHITE, outline_color: Color::DARKGRAY },
+            UIButton { x: 0.0, y: 38.0, text: String::from("CONNECT"), font_size: 20, text_color: Color::BLACK, width: 120.0, height: 30.0, color: Color::WHITE, outline_color: Color::DARKGRAY },
+        ],
     };
     let mut post_game_menu = UIBox {
         x: 0.0,
@@ -55,6 +62,14 @@ fn main() {
         outline_color: Color::BLACK,
         buttons: vec![UIButton { x: 0.0, y: 10.0, text: String::from("continue"), font_size: 20, text_color: Color::BLACK, width: 100.0, height: 30.0, color: Color::WHITE, outline_color: Color::DARKGRAY }],
     };
+    
+
+    // networking
+    let mut chess_server: Option<ChessServer> = None;
+    let mut chess_client: Option<ChessClient> = None;
+
+    let mut opponent_name = String::new();
+    let mut was_offered_draw = false;
 
     while !rl.window_should_close() {
         
@@ -114,6 +129,7 @@ fn main() {
         let square_x = ((mouse_x - board_left) / board_square_size).floor();
         let square_y = ((mouse_y - board_top) / board_square_size).floor();
 
+        // pre game menu logic
         if pre_game {
             for button in &mut pre_game_menu.buttons {
                 if button.is_hovered(Vector2::new(center_x + pre_game_menu.x, center_y + pre_game_menu.y), scale, mouse_x, mouse_y) {
@@ -121,7 +137,20 @@ fn main() {
                     button.color = Color::WHITE;
 
                     if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
-                        pre_game = false;
+                        chess_server = None;
+                        chess_client = None;
+                        match button.text.as_str() {
+                            "PLAY" => pre_game = false,
+                            "HOST" => chess_server = ChessServer::new(&String::from("127.0.0.1"), 8787, Some(String::from("Oscar Server"))),
+                            "CONNECT" => {
+                                chess_client = ChessClient::new(&String::from("127.0.0.1"), 8787, Some(String::from("Oscar Client")));
+                                if let Some(client) = &mut chess_client {
+                                    pre_game = false;
+                                    client.send_start();
+                                }
+                            }
+                            _ => (),
+                        }
                     }
                 }
                 else {
@@ -130,6 +159,7 @@ fn main() {
             }
         }
 
+        // post game menu logic
         if game.result != ChessResult::Ongoing {
             for button in &mut post_game_menu.buttons {
                 if button.is_hovered(Vector2::new(center_x + post_game_menu.x, center_y + post_game_menu.y), scale, mouse_x, mouse_y) {
@@ -147,15 +177,205 @@ fn main() {
             }
         }
         
+        // network phases
+        let mut can_move = true;
+        let mut promotion = false;
+        if let Some(server) = &mut chess_server {
+            can_move = false;
+            match server.network_phase {
+                NetworkPhase::NoConnection => server.listen(), // listen for incoming connection
+                NetworkPhase::FoundConnection => { // a connection was established
+                    pre_game = false;
+                    server.network_phase = NetworkPhase::Start
+                },
+                NetworkPhase::Start => { // listen for start message and then reply
+                    if let Some(start) = server.receive_start() {
+                        if let Some(op_name) = start.name {
+                            opponent_name = op_name;
+                        }
+
+                        server.send_start();
+
+                        server.network_phase = match server.own_color {
+                            PieceColor::White => NetworkPhase::Move,
+                            PieceColor::Black => NetworkPhase::Ack,
+                        };
+
+                    }
+                },
+                NetworkPhase::Move => { // make a move or listen for one
+                    if game.turn != server.own_color {
+                        if let Some(pmove) = server.receive_move() { // listen
+                            // Receive a move
+                            if pmove.forfeit {
+                                game.declare_win(server.own_color);
+                                todo!();
+                            } else if pmove.offer_draw {
+                                todo!();
+                            } else if game.do_move(&to_square(&pmove.from), &to_square(&pmove.to)) {
+                                if game.promotion {
+                                    match pmove.promotion {
+                                        Some(promotion) => _ = game.pawn_promotion(match promotion {
+                                            PromotionPiece::Queen => PieceType::Queen,
+                                            PromotionPiece::Bishop => PieceType::Bishop,
+                                            PromotionPiece::Knight => PieceType::Knight,
+                                            PromotionPiece::Rook => PieceType::Rook,
+                                        }),
+                                        None => server.send_ack(false, None),
+                                    }
+                                }
+                                if !game.promotion {
+                                    server.send_ack(true, match game.result {
+                                        ChessResult::Ongoing => None,
+                                        ChessResult::WhiteWon | ChessResult::BlackWon => Some(GameState::CheckMate),
+                                        ChessResult::Draw => Some(GameState::Draw),
+                                    });
+                                }
+                            } else {
+                                server.send_ack(false, match game.result {
+                                    ChessResult::Ongoing => None,
+                                    ChessResult::WhiteWon | ChessResult::BlackWon => Some(GameState::CheckMate),
+                                    ChessResult::Draw => Some(GameState::Draw),
+                                });
+                            }
+                        }
+                    }
+                    can_move = game.turn == server.own_color; // allow the making of moves if it is own turn
+                }
+                NetworkPhase::Ack => { // listen for an ack response after a move was made
+                    if let Some(ack) = server.receive_ack() {
+                        if let Some(saved_move) = &server.saved_move {
+                            if saved_move.forfeit { // forfeit
+                                game.declare_win(!server.own_color);
+                            } else if saved_move.offer_draw { // offer draw
+                                if ack.ok {
+                                    // do draw
+                                    game.declare_draw();
+                                    server.saved_move = None;
+                                }
+                                // else don't do draw
+                            } else { // move!
+                                if ack.ok {
+                                    // do move
+                                    complete_move(&mut game, saved_move);
+                                    server.saved_move = None;
+                                } else {
+                                    // server is boss: do move anyway
+                                    complete_move(&mut game, saved_move);
+                                    server.saved_move = None;
+                                }
+                            }
+                        }
+                    }
+                }
+                NetworkPhase::GameOver => (),
+            }
+        } else if let Some(client) = &mut chess_client {
+            can_move = false;
+            match client.network_phase {
+                NetworkPhase::NoConnection => (), // will literaly never happen
+                NetworkPhase::FoundConnection => client.send_start(), // send start when a connection is established, will set phase to Start
+                NetworkPhase::Start => { // listen for start
+                    if let Some(start) = client.receive_start() {
+                        if let Some(op_name) = start.name {
+                            opponent_name = op_name;
+                        }
+                        client.own_color = if start.is_white { PieceColor::White } else { PieceColor::Black };
+
+                        if let Some(fen) = start.fen {
+                            game = Game::from_fen(&fen);
+                        }
+
+                        client.network_phase = match client.own_color {
+                            PieceColor::White => NetworkPhase::Move,
+                            PieceColor::Black => NetworkPhase::Ack,
+                        };
+                    }
+                },
+                NetworkPhase::Move => { // make move or listen for one depending on turn
+                    if game.turn != client.own_color {
+                        if let Some(pmove) = client.receive_move() { // listen
+                            if pmove.forfeit {
+                                game.declare_win(client.own_color);
+                                client.send_ack(true, Some(GameState::CheckMate));
+                            } else if pmove.offer_draw {
+                                todo!();
+                            } else if game.do_move(&to_square(&pmove.from), &to_square(&pmove.to)) {
+                                if game.promotion {
+                                    match pmove.promotion {
+                                        Some(promotion) => _ = game.pawn_promotion(match promotion {
+                                            PromotionPiece::Queen => PieceType::Queen,
+                                            PromotionPiece::Bishop => PieceType::Bishop,
+                                            PromotionPiece::Knight => PieceType::Knight,
+                                            PromotionPiece::Rook => PieceType::Rook,
+                                        }),
+                                        None => client.send_ack(false, None),
+                                    }
+                                }
+                                if !game.promotion {
+                                    client.send_ack(true, match game.result {
+                                        ChessResult::Ongoing => None,
+                                        ChessResult::WhiteWon | ChessResult::BlackWon => Some(GameState::CheckMate),
+                                        ChessResult::Draw => Some(GameState::Draw),
+                                    });
+                                }
+                            } else {
+                                client.send_ack(false, match game.result {
+                                    ChessResult::Ongoing => None,
+                                    ChessResult::WhiteWon | ChessResult::BlackWon => Some(GameState::CheckMate),
+                                    ChessResult::Draw => Some(GameState::Draw),
+                                });
+                            }
+                        }
+                    }
+                    can_move = game.turn == client.own_color; // allow the making of moves if it is own turn
+                },
+                NetworkPhase::Ack => { // listen for an ack response after a move was made
+                    if let Some(ack) = client.receive_ack() {
+                        if let Some(saved_move) = &client.saved_move {
+                            if saved_move.forfeit { // forfeit
+                                game.declare_win(!client.own_color);
+                                client.saved_move = None;
+                            } else if saved_move.offer_draw { // offer draw
+                                if ack.ok {
+                                    // do draw
+                                    game.declare_draw();
+                                    client.saved_move = None;
+                                }
+                                // else don't do draw
+                            } else { // move!
+                                if ack.ok {
+                                    // do move
+                                    complete_move(&mut game, saved_move);
+                                    client.saved_move = None;
+                                } else {
+                                    // server is boss: don't do move
+                                    client.saved_move = None;
+                                }
+                            }
+                        }
+                    }
+                }
+                NetworkPhase::GameOver => (),
+            }
+        }
 
         // chess logic
-        if !pre_game && square_x >= 0.0 && square_x <= 7.0 && square_y >= 0.0 && square_y <= 7.0 {
-            if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
+        // if clicked on the board
+        if !pre_game && can_move && square_x >= 0.0 && square_x <= 7.0 && square_y >= 0.0 && square_y <= 7.0 &&
+            rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
                 
             let square = Square::from((mirror(square_x as i8, rotated), mirror(square_y as i8, !rotated)));
             if !game.promotion {
                 if positions.contains(&square) {
                     game.do_move(&selected_square, &square);
+                    if !game.promotion {
+                        if let Some(server) = chess_server.as_mut() {
+                            server.send_move(
+                                (selected_square.x as u8, selected_square.y as u8),
+                                (square.x as u8, square.y as u8), None, false, false);
+                        }
+                    }
                     positions.clear();
                     selected_square = Square::from((-1, -1));
                 } else {
@@ -163,27 +383,24 @@ fn main() {
                     positions = game.get_moves_list(&square);
                 }
             }
-            else { // promotion
-                if square.x == game.last_moved_to.x {
+            else if square.x == game.last_moved_to.x { // promotion
 
-                    let distance_to_pawn = if game.last_moved_to.y > square.y {
-                        game.last_moved_to.y - square.y
-                    } else {
-                        square.y - game.last_moved_to.y
-                    };
+                let distance_to_pawn = if game.last_moved_to.y > square.y {
+                    game.last_moved_to.y - square.y
+                } else {
+                    square.y - game.last_moved_to.y
+                };
 
-                    if square.y <= match game.last_moved_to.y { 0 => 4, 7 => 6, _ => -1 } &&
+                if square.y <= match game.last_moved_to.y { 0 => 4, 7 => 6, _ => -1 } &&
                     square.y >= match game.last_moved_to.y { 0 => 1, 7 => 3, _ => 100 } {
-                        
-                        _ = match distance_to_pawn { // returns true if successful (play sound?)
-                            1 => game.pawn_promotion(PieceType::Queen),
-                            2 => game.pawn_promotion(PieceType::Rook),
-                            3 => game.pawn_promotion(PieceType::Bishop),
-                            4 => game.pawn_promotion(PieceType::Knight),
-                            _ => false,
-                        };
-                    }
-                }
+                    
+                    _ = match distance_to_pawn { // returns true if successful (play sound?)
+                        1 => game.pawn_promotion(PieceType::Queen),
+                        2 => game.pawn_promotion(PieceType::Rook),
+                        3 => game.pawn_promotion(PieceType::Bishop),
+                        4 => game.pawn_promotion(PieceType::Knight),
+                        _ => false,
+                    };
                 }
             }
         }
@@ -318,11 +535,12 @@ fn main() {
             //d.draw_circle(mouse_x as i32, mouse_y as i32, 5.0, Color::RED);
         }
 
-        // menu
+        // pre game menu
         if pre_game {
             pre_game_menu.draw(&mut d, Vector2::new(center_x, center_y), scale);
         }
 
+        // post game menu
         if game.result != ChessResult::Ongoing {
             let t = match game.result {
                 ChessResult::Ongoing => "",
@@ -455,7 +673,7 @@ impl UIElement for UIBox {
 
         d.draw_text(&self.text,
             (origin.x + (self.x - text_width / 2.0) * scale) as i32,
-            (origin.y + (self.y - self.height as f32 / 2.0) * scale) as i32,
+            (origin.y + (self.y - self.height as f32 / 2.0 + 2.0) * scale) as i32,
             (self.font_size as f32 * scale) as i32, self.text_color);
 
         for button in &self.buttons {
@@ -505,4 +723,358 @@ impl UIButton {
         
         left < mouse_x && mouse_x < right && top < mouse_y && mouse_y < bottom
     }
+}
+
+struct ChessServer {
+    listener: TcpListener,
+    stream: Option<TcpStream>,
+    own_color: PieceColor,
+    name: Option<String>,
+    network_phase: NetworkPhase,
+    saved_move: Option<Move>,
+}
+
+impl ChessServer {
+    fn new(address: &String, port: u16, name: Option<String>) -> Option<Self> {
+        let addr = format!("{}:{}", address, port);
+        let listener = match TcpListener::bind(&addr) {
+            Ok(listener) => listener,
+            Err(_) => return None,
+        };
+
+        listener.set_nonblocking(true).unwrap();
+
+        let stream = None;
+
+        let own_color = PieceColor::White;
+        let network_phase = NetworkPhase::NoConnection;
+        let last_move = None;
+
+        Some(Self { listener, stream, own_color, name, network_phase, saved_move: last_move })
+    }
+
+    fn listen(&mut self) {
+        self.stream = match self.listener.accept() {
+            Ok((stream, _)) => {
+                println!("Connection established!");
+                self.network_phase = NetworkPhase::FoundConnection;
+                Some(stream)
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                // Non-blocking mode; no connection yet
+                None
+            }
+            Err(e) => {
+                println!("Connection failed: {}", e);
+                None
+            }
+        }
+    }
+
+    fn has_active_connection(&self) -> bool {
+        match &self.stream {
+            Some(_) => true,
+            None => false,
+        }
+    }
+
+    fn send_start(&mut self) {
+        let start = Start {
+            is_white: self.own_color == PieceColor::White,
+            name: self.name.clone(),
+            fen: None,
+            time: None,
+            inc: None,
+        };
+
+        let mut buf = Vec::<u8>::try_from(start).unwrap();
+        let mut stream = match &self.stream {
+            Some(stream) => stream,
+            None => return,
+        };
+
+        stream.write_all(&mut buf).unwrap();
+    }
+
+    fn send_move(&mut self, from: (u8, u8), to: (u8, u8), promotion: Option<PromotionPiece>, forfeit: bool, offer_draw: bool) {
+        let pmove = Move {
+            from,
+            to,
+            promotion,
+            forfeit,
+            offer_draw,
+        };
+
+        let mut buf = Vec::<u8>::try_from(pmove.clone()).unwrap();
+
+        let mut stream = match &self.stream {
+            Some(stream) => stream,
+            None => return,
+        };
+
+        self.saved_move = Some(pmove);
+
+        stream.write_all(&mut buf).unwrap();
+    }
+
+    fn send_ack(&mut self, ok: bool, end_state: Option<GameState>) {
+        let ack = Ack {
+            ok,
+            end_state,
+        };
+
+        let mut buf = Vec::<u8>::try_from(ack).unwrap();
+
+        let mut stream = match &self.stream {
+            Some(stream) => stream,
+            None => return,
+        };
+
+        stream.write_all(&mut buf).unwrap();
+    }
+
+    fn receive_start(&mut self) -> Option<Start> {
+        let mut stream = match &self.stream {
+            Some(stream) => stream,
+            None => return None,
+        };
+
+        let mut buf = [0; 512];
+        
+        match stream.read(&mut buf) {
+            Ok(size) if size > 0 => {
+                match Start::try_from(&buf[..size]) {
+                    Ok(start) => Some(start),
+                    Err(_) => None,
+                }
+            },
+            Ok(_) => None, // no data
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                None
+            },
+            Err(e) => {
+                println!("Error: {}", e);
+                None
+            }
+        }
+    }
+
+    fn receive_move(&mut self) -> Option<Move> {
+        let mut stream = match &self.stream {
+            Some(stream) => stream,
+            None => return None,
+        };
+
+
+        let mut buf = [0; 512];
+        
+        match stream.read(&mut buf) {
+            Ok(size) if size > 0 => {
+                match Move::try_from(&buf[..size]) {
+                    Ok(pmove) => Some(pmove),
+                    Err(_) => None,
+                }
+            },
+            Ok(_) => None, // no data
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                None
+            },
+            Err(e) => {
+                println!("Error: {}", e);
+                None
+            }
+        }
+    }
+
+    fn receive_ack(&mut self) -> Option<Ack> {
+        let mut stream = match &self.stream {
+            Some(stream) => stream,
+            None => return None,
+        };
+
+        let mut buf = [0; 512];
+        
+        match stream.read(&mut buf) {
+            Ok(size) if size > 0 => {
+                match Ack::try_from(&buf[..size]) {
+                    Ok(ack) => Some(ack),
+                    Err(_) => None,
+                }
+            },
+            Ok(_) => None, // no data
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                None
+            },
+            Err(e) => {
+                println!("Error: {}", e);
+                None
+            }
+        }
+    }
+}
+
+struct ChessClient {
+    stream: TcpStream,
+    own_color: PieceColor,
+    name: Option<String>,
+    network_phase: NetworkPhase,
+    saved_move: Option<Move>,
+}
+
+impl ChessClient {
+    fn new(address: &String, port: u16, name: Option<String>) -> Option<Self> {
+        let addr = format!("{}:{}", address, port);
+        let stream = match TcpStream::connect(addr) {
+            Ok(stream) => stream,
+            Err(_) => return None,
+        };
+        stream.set_nonblocking(true).unwrap();
+
+        let own_color = PieceColor::Black;
+        let network_phase = NetworkPhase::FoundConnection;
+        let last_move = None;
+
+        Some(Self { stream, own_color, name, network_phase, saved_move: last_move })
+    }
+
+    fn send_start(&mut self) {
+        let start = Start {
+            is_white: self.own_color == PieceColor::White,
+            name: self.name.clone(),
+            fen: None,
+            time: None,
+            inc: None,
+        };
+
+        let mut buf = Vec::<u8>::try_from(start).unwrap();
+
+        self.stream.write_all(&mut buf).unwrap();
+
+        self.network_phase = NetworkPhase::Start;
+    }
+
+    fn send_move(&mut self, from: (u8, u8), to: (u8, u8), promotion: Option<PromotionPiece>, forfeit: bool, offer_draw: bool) {
+        let pmove = Move {
+            from,
+            to,
+            promotion,
+            forfeit,
+            offer_draw,
+        };
+
+        let mut buf = Vec::<u8>::try_from(pmove).unwrap();
+
+        self.stream.write_all(&mut buf).unwrap();
+    }
+
+    fn send_ack(&mut self, ok: bool, end_state: Option<GameState>) {
+        let ack = Ack {
+            ok,
+            end_state,
+        };
+
+        let mut buf = Vec::<u8>::try_from(ack).unwrap();
+
+        self.stream.write_all(&mut buf).unwrap();
+    }
+
+    fn receive_start(&mut self) -> Option<Start> {
+        let mut buf = [0; 512];
+        
+        match self.stream.read(&mut buf) {
+            Ok(size) if size > 0 => {
+                match Start::try_from(&buf[..size]) {
+                    Ok(start) => Some(start),
+                    Err(_) => None,
+                }
+            },
+            Ok(_) => None, // no data
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                None
+            },
+            Err(e) => {
+                println!("Error: {}", e);
+                None
+            }
+        }
+    }
+
+    fn receive_move(&mut self) -> Option<Move> {
+        let mut buf = [0; 512];
+        
+        match self.stream.read(&mut buf) {
+            Ok(size) if size > 0 => {
+                match Move::try_from(&buf[..size]) {
+                    Ok(pmove) => Some(pmove),
+                    Err(_) => None,
+                }
+            },
+            Ok(_) => None, // no data
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                None
+            },
+            Err(e) => {
+                println!("Error: {}", e);
+                None
+            }
+        }
+    }
+
+    fn receive_ack(&mut self) -> Option<Ack> {
+        let mut buf = [0; 512];
+        
+        match self.stream.read(&mut buf) {
+            Ok(size) if size > 0 => {
+                match Ack::try_from(&buf[..size]) {
+                    Ok(ack) => Some(ack),
+                    Err(_) => None,
+                }
+            },
+            Ok(_) => None, // no data
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                None
+            },
+            Err(e) => {
+                println!("Error: {}", e);
+                None
+            }
+        }
+    }
+}
+
+enum NetworkPhase {
+    NoConnection,
+    FoundConnection, // client sends start and server listens for start
+    Start,      // server sends start and client listens
+    Move,       // doing / listening for move
+    Ack,        // listening for ack
+    GameOver,
+}
+
+fn to_square(pos: &(u8, u8)) -> Square {
+    Square { x: pos.0 as i8, y: pos.1 as i8 }
+}
+
+fn complete_move(game: &mut Game, pmove: &Move) -> bool {
+    if !game.do_move(&to_square(&pmove.from), &to_square(&pmove.to)) {
+        return false
+    }
+
+    if game.promotion {
+        game.pawn_promotion(if let Some(promotion_piece) = &pmove.promotion {
+            match promotion_piece {
+                PromotionPiece::Queen => PieceType::Queen,
+                PromotionPiece::Bishop => PieceType::Bishop,
+                PromotionPiece::Knight => PieceType::Knight,
+                PromotionPiece::Rook => PieceType::Rook,
+            }
+        }
+        else {
+            // no promotion_piece was supplied, defaulting to queen
+            println!("no promotion_piece was supplied, defaulting to queen");
+            PieceType::Queen
+        });
+            
+    }
+    true
 }

@@ -5,4 +5,5 @@ edition = "2021"
 
 [dependencies]
 oscae-chess = { git = "https://github.com/INDA24PlusPlus/oscae-chess.git" }
+chess-networking = { git = "https://github.com/INDA24PlusPlus/chess-networking.git" }
 raylib = "5.0.2"
