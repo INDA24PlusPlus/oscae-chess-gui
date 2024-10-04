@@ -35,6 +35,9 @@ fn main() {
     let mut rotated = false;
 
     let mut pre_game = true;
+    let mut addr_text = String::from("127.0.0.1:8787");
+    let mut addr_input_active = false;
+    let mut show_connect_menu = false;
     let mut pre_game_menu = UIBox {
         x: 0.0,
         y: 0.0,
@@ -48,7 +51,23 @@ fn main() {
         buttons: vec![
             UIButton { x: 0.0, y: -30.0, text: String::from("PLAY"), font_size: 20, text_color: Color::BLACK, width: 120.0, height: 30.0, color: Color::WHITE, outline_color: Color::DARKGRAY },
             UIButton { x: 0.0, y: 4.0, text: String::from("HOST"), font_size: 20, text_color: Color::BLACK, width: 120.0, height: 30.0, color: Color::WHITE, outline_color: Color::DARKGRAY },
-            UIButton { x: 0.0, y: 38.0, text: String::from("CONNECT"), font_size: 20, text_color: Color::BLACK, width: 120.0, height: 30.0, color: Color::WHITE, outline_color: Color::DARKGRAY },
+            UIButton { x: 0.0, y: 38.0, text: String::from("JOIN"), font_size: 20, text_color: Color::BLACK, width: 120.0, height: 30.0, color: Color::WHITE, outline_color: Color::DARKGRAY },
+        ],
+    };
+    let mut connect_menu = UIBox {
+        x: 0.0,
+        y: 0.0,
+        text: String::from("Connect"),
+        font_size: 12,
+        text_color: Color::BLACK,
+        width: 160.0,
+        height: 120.0,
+        color: Color::LIGHTGRAY,
+        outline_color: Color::BLACK,
+        buttons: vec![
+            UIButton { x: 0.0, y: -30.0, text: addr_text.clone(), font_size: 20, text_color: Color::BLACK, width: 120.0, height: 30.0, color: Color::WHITE, outline_color: Color::DARKGRAY },
+            UIButton { x: 0.0, y: 4.0, text: String::from("CONNECT"), font_size: 20, text_color: Color::BLACK, width: 120.0, height: 30.0, color: Color::WHITE, outline_color: Color::DARKGRAY },
+            UIButton { x: 0.0, y: 38.0, text: String::from("BACK"), font_size: 20, text_color: Color::BLACK, width: 120.0, height: 30.0, color: Color::WHITE, outline_color: Color::DARKGRAY },
         ],
     };
     let mut post_game_menu = UIBox {
@@ -133,7 +152,7 @@ fn main() {
         let square_y = ((mouse_y - board_top) / board_square_size).floor();
 
         // pre game menu logic
-        if pre_game {
+        if pre_game && !show_connect_menu {
             for button in &mut pre_game_menu.buttons {
                 if button.is_hovered(Vector2::new(center_x + pre_game_menu.x, center_y + pre_game_menu.y), scale, mouse_x, mouse_y) {
 
@@ -145,12 +164,8 @@ fn main() {
                         match button.text.as_str() {
                             "PLAY" => pre_game = false,
                             "HOST" => chess_server = ChessServer::new(&String::from("127.0.0.1"), 8787, Some(String::from("Oscar Server"))),
-                            "CONNECT" => {
-                                chess_client = ChessClient::new(&String::from("127.0.0.1"), 8787, Some(String::from("Oscar Client")));
-                                if let Some(client) = &mut chess_client {
-                                    pre_game = false;
-                                    client.send_start();
-                                }
+                            "JOIN" => {
+                                show_connect_menu = true;
                             }
                             _ => (),
                         }
@@ -158,6 +173,67 @@ fn main() {
                 }
                 else {
                     button.color = Color::LIGHTGRAY;
+                }
+            }
+        } else if show_connect_menu {
+            match connect_menu.buttons.get_mut(0) {
+                Some(address_field) => address_field.text = addr_text.clone(),
+                None => (),
+            }
+
+            for button in &mut connect_menu.buttons {
+                if button.is_hovered(Vector2::new(center_x + pre_game_menu.x, center_y + pre_game_menu.y), scale, mouse_x, mouse_y) {
+
+                    button.color = Color::WHITE;
+
+                    if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
+                        addr_input_active = false;
+
+                        match button.text.as_str() {
+                            "CONNECT" => {
+                                chess_client = ChessClient::new(&addr_text, Some(String::from("Oscar Client")));
+                                if let Some(client) = &mut chess_client {
+                                    pre_game = false;
+                                    show_connect_menu = false;
+                                    client.send_start();
+                                }
+                            }
+                            "BACK" => show_connect_menu = false,
+                            _ => {
+                                addr_input_active = true;
+                            },
+                        }
+                    }
+                }
+                else {
+                    button.color = Color::LIGHTGRAY;
+                }
+            }
+
+            if addr_input_active {
+                if let Some(key) = rl.get_key_pressed() {
+                    match key {
+                        KeyboardKey::KEY_BACKSPACE => _ = addr_text.pop(),
+                        KeyboardKey::KEY_ENTER => {
+                            chess_client = ChessClient::new(&addr_text, Some(String::from("Oscar Client")));
+                            if let Some(client) = &mut chess_client {
+                                pre_game = false;
+                                show_connect_menu = false;
+                                client.send_start();
+                            }
+                        },
+                        KeyboardKey::KEY_LEFT_SHIFT | KeyboardKey::KEY_RIGHT_SHIFT => (),
+                        KeyboardKey::KEY_PERIOD => {
+                            match rl.is_key_down(KeyboardKey::KEY_LEFT_SHIFT) || rl.is_key_down(KeyboardKey::KEY_RIGHT_SHIFT) {
+                                true => addr_text.push(':'),
+                                false => addr_text.push('.'),
+                            }
+                        }
+                        _ => {
+                            let key = key as u8 as char;
+                            addr_text.push(key.to_ascii_lowercase());
+                        }
+                    }
                 }
             }
         }
@@ -451,7 +527,7 @@ fn main() {
             if !game.promotion && !promotion_network {
                 if positions.contains(&square) {
                     if let Some(server) = chess_server.as_mut() {   // server
-                        let (result, promotion, legal) = game.try_move(&selected_square, &square);
+                        let (_, promotion, legal) = game.try_move(&selected_square, &square);
 
                         if legal {
                             if promotion {
@@ -468,7 +544,7 @@ fn main() {
                             }
                         }
                     } else if let Some(client) = chess_client.as_mut() { // client
-                        let (result, promotion, legal) = game.try_move(&selected_square, &square);
+                        let (_, promotion, legal) = game.try_move(&selected_square, &square);
 
                         if legal {
                             if promotion {
@@ -726,8 +802,13 @@ fn main() {
         }
 
         // pre game menu
-        if pre_game {
+        if pre_game && !show_connect_menu {
             pre_game_menu.draw(&mut d, Vector2::new(center_x, center_y), scale);
+        }
+
+        // connect menu
+        if show_connect_menu {
+            connect_menu.draw(&mut d, Vector2::new(center_x, center_y), scale);
         }
 
         // post game menu
@@ -961,7 +1042,7 @@ impl ChessServer {
         }
     }
 
-    fn has_active_connection(&self) -> bool {
+    fn _has_active_connection(&self) -> bool {
         match &self.stream {
             Some(_) => true,
             None => false,
@@ -1114,9 +1195,8 @@ struct ChessClient {
 }
 
 impl ChessClient {
-    fn new(address: &String, port: u16, name: Option<String>) -> Option<Self> {
-        let addr = format!("{}:{}", address, port);
-        let stream = match TcpStream::connect(addr) {
+    fn new(address: &String, name: Option<String>) -> Option<Self> {
+        let stream = match TcpStream::connect(address) {
             Ok(stream) => stream,
             Err(_) => return None,
         };
@@ -1128,6 +1208,11 @@ impl ChessClient {
 
         Some(Self { stream, own_color, name, network_phase, saved_move: last_move })
     }
+
+    //fn new_a(address: &String, port: u16, name: Option<String>) -> Option<Self> {
+    //    let addr = format!("{}:{}", address, port);
+    //    Self::new(&addr, name)
+    //}
 
     fn send_start(&mut self) {
         let start = Start {
