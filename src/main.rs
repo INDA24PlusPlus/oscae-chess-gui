@@ -209,6 +209,20 @@ fn main() {
                     }
                 },
                 NetworkPhase::Move => { // make a move or listen for one
+                    if was_offered_draw {
+                        notification = String::from(format!("{opponent_name} offers a draw. Accept? (Y/N)"));
+                        notification_time = 0.0;
+                        if rl.is_key_pressed(KeyboardKey::KEY_Y) {
+                            server.send_ack(true, Some(GameState::Draw));
+                            game.declare_draw();
+                            server.network_phase = NetworkPhase::GameOver;
+                            was_offered_draw = false;
+                        } else if rl.is_key_pressed(KeyboardKey::KEY_N) {
+                            server.send_ack(false, None);
+                            was_offered_draw = false;
+                        }
+                    }
+
                     if game.turn != server.own_color {
                         if let Some(pmove) = server.receive_move() { // listen
                             // Receive a move
@@ -216,9 +230,10 @@ fn main() {
 
                             if pmove.forfeit {
                                 game.declare_win(server.own_color);
-                                todo!();
+                                server.send_ack(true, Some(GameState::CheckMate));
+                                server.network_phase = NetworkPhase::GameOver;
                             } else if pmove.offer_draw {
-                                todo!();
+                                was_offered_draw = true;
                             } else if game.do_move(&to_square(&pmove.from), &to_square(&pmove.to)) {
                                 if game.promotion {
                                     match pmove.promotion {
@@ -245,6 +260,14 @@ fn main() {
                                     ChessResult::Draw => Some(GameState::Draw),
                                 });
                             }
+                        }
+                    } else { // own turn
+                        if rl.is_key_pressed(KeyboardKey::KEY_O) { 
+                            // offer draw
+                            server.send_move((0, 0), (0, 0), None, false, true);
+                        } else if rl.is_key_pressed(KeyboardKey::KEY_P) {
+                            // forfeit
+                            server.send_move((0, 0), (0, 0), None, true, false);
                         }
                     }
                     can_move = game.turn == server.own_color; // allow the making of moves if it is own turn
@@ -283,7 +306,7 @@ fn main() {
                         }
                     }
                 }
-                NetworkPhase::GameOver => (),
+                NetworkPhase::GameOver => chess_server = None,
             }
         } else if let Some(client) = &mut chess_client {
             can_move = false;
@@ -313,6 +336,20 @@ fn main() {
                     }
                 },
                 NetworkPhase::Move => { // make move or listen for one depending on turn
+                    if was_offered_draw {
+                        notification = String::from(format!("{opponent_name} offers a draw. Accept? (Y/N)"));
+                        notification_time = 0.0;
+                        if rl.is_key_pressed(KeyboardKey::KEY_Y) {
+                            client.send_ack(true, Some(GameState::Draw));
+                            game.declare_draw();
+                            client.network_phase = NetworkPhase::GameOver;
+                            was_offered_draw = false;
+                        } else if rl.is_key_pressed(KeyboardKey::KEY_N) {
+                            client.send_ack(false, None);
+                            was_offered_draw = false;
+                        }
+                    }
+
                     if game.turn != client.own_color {
                         if let Some(pmove) = client.receive_move() { // listen
                             // move received
@@ -321,8 +358,9 @@ fn main() {
                             if pmove.forfeit {
                                 game.declare_win(client.own_color);
                                 client.send_ack(true, Some(GameState::CheckMate));
+                                client.network_phase = NetworkPhase::GameOver;
                             } else if pmove.offer_draw {
-                                todo!();
+                                was_offered_draw = true;
                             } else if game.do_move(&to_square(&pmove.from), &to_square(&pmove.to)) {
                                 if game.promotion {
                                     match pmove.promotion {
@@ -349,6 +387,14 @@ fn main() {
                                     ChessResult::Draw => Some(GameState::Draw),
                                 });
                             }
+                        }
+                    } else { // own turn
+                        if rl.is_key_pressed(KeyboardKey::KEY_O) { 
+                            // offer draw
+                            client.send_move((0, 0), (0, 0), None, false, true);
+                        } else if rl.is_key_pressed(KeyboardKey::KEY_P) {
+                            // forfeit
+                            client.send_move((0, 0), (0, 0), None, true, false);
                         }
                     }
                     can_move = game.turn == client.own_color; // allow the making of moves if it is own turn
@@ -387,7 +433,7 @@ fn main() {
                         }
                     }
                 }
-                NetworkPhase::GameOver => (),
+                NetworkPhase::GameOver => chess_client = None,
             }
         }
 
