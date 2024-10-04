@@ -1,5 +1,6 @@
 //! Basic hello world example.
 
+use ffi::GetRandomValue;
 use oscae_chess::*;
 use chess_networking::*;
 
@@ -196,7 +197,11 @@ fn main() {
                             println!("Opponent name: {opponent_name}");
                         }
 
-                        server.send_start();
+                        server.own_color = match unsafe { GetRandomValue(0, 1) } == 0 {
+                            true => PieceColor::White,
+                            false => PieceColor::Black,
+                        };
+                        server.send_start(Some(game.to_fen()));
 
                         server.network_phase = NetworkPhase::Move;
 
@@ -963,11 +968,11 @@ impl ChessServer {
         }
     }
 
-    fn send_start(&mut self) {
+    fn send_start(&mut self, fen: Option<String>) {
         let start = Start {
             is_white: self.own_color != PieceColor::White,
             name: self.name.clone(),
-            fen: None,
+            fen: fen,
             time: None,
             inc: None,
         };
