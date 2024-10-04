@@ -20,7 +20,7 @@ dependencies = [
 [[package]]
 name = "angun-chess"
 version = "0.1.0"
-source = "git+https://github.com/INDA24PlusPlus/angun-chess#c56dd29485fe3b999f30ea5467bb99c37a47f951"
+source = "git+https://github.com/INDA24PlusPlus/angun-chess.git#c56dd29485fe3b999f30ea5467bb99c37a47f951"
 
 [[package]]
 name = "arrayvec"
@@ -228,9 +228,7 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 [[package]]
 name = "libc"
 version = "0.2.159"
-version = "0.2.159"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "561d97a539a36e26a9a5fad1ea11a3039a67714694aaa379433e580854bc3dc5"
 checksum = "561d97a539a36e26a9a5fad1ea11a3039a67714694aaa379433e580854bc3dc5"
 
 [[package]]
@@ -318,16 +316,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "oscae-chess"
-version = "0.1.0"
-source = "git+https://github.com/INDA24PlusPlus/oscae-chess.git#23d32a4bab47129570bd476cebf78c3f31b322d5"
-
-[[package]]
 name = "oscae-chess-gui"
 version = "0.1.0"
 dependencies = [
+ "angun-chess",
  "chess-networking",
- "oscae-chess",
  "raylib",
 ]
 
@@ -424,10 +417,8 @@ dependencies = [
 [[package]]
 name = "redox_syscall"
 version = "0.5.7"
-version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b6dfecf2c74bce2466cabf93f6664d6998a69eb21e39f4207930065b27b771f"
-checksum = "355ae415ccd3a04315d3f8246e86d67689ea74d88d915576e1589a351062a13b"
 dependencies = [
  "bitflags",
 ]

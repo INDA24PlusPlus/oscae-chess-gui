@@ -22,7 +22,7 @@ fn main() {
     rl.set_target_fps(60);
 
     // Init
-    let mut game = Game::new();
+    let mut game = ChessEngine::new();
 
     // Content
     let mut assets = ChessAssets::new(&mut rl, &thread, 2, 3);
@@ -33,9 +33,11 @@ fn main() {
     let mut notification_time = 0.0;
 
     let mut positions = Vec::<(i32, i32)>::new();
-    let mut selected_square = Square::from((-1, -1));
+    //let mut selected_square = Square::from((-1, -1));
+    let mut selected_piece = String::new();
     let mut rotated = false;
 
+    // menu
     let mut pre_game = true;
     let mut addr_text = String::from("127.0.0.1:8787");
     let mut addr_input_active = false;
@@ -249,7 +251,7 @@ fn main() {
 
                     if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
                         pre_game = true;
-                        game = Game::new();
+                        game = ChessEngine::new();
                     }
                 }
                 else {
@@ -275,20 +277,12 @@ fn main() {
                             println!("Opponent name: {opponent_name}");
                         }
 
-                        server.own_color = match unsafe { GetRandomValue(0, 1) } == 0 {
-                            true => PieceColor::White,
-                            false => PieceColor::Black,
-                        };
-                        server.send_start(Some(game.to_fen()));
+                        server.own_color_is_white = unsafe { GetRandomValue(0, 1) } == 0;
+                        server.send_start(None);
 
                         server.network_phase = NetworkPhase::Move;
 
-                        rotated = server.own_color == PieceColor::Black;
-
-                        println!("My color: {}", match server.own_color {
-                            PieceColor::White => "White",
-                            PieceColor::Black => "Black",
-                        });
+                        rotated = !server.own_color_is_white;
                     }
                 },
                 NetworkPhase::Move => { // make a move or listen for one
@@ -297,7 +291,7 @@ fn main() {
                         notification_time = 0.0;
                         if rl.is_key_pressed(KeyboardKey::KEY_Y) {
                             server.send_ack(true, Some(GameState::Draw));
-                            game.declare_draw();
+                            game.result = ChessResult::Draw;
                             server.network_phase = NetworkPhase::GameOver;
                             was_offered_draw = false;
                         } else if rl.is_key_pressed(KeyboardKey::KEY_N) {
@@ -306,18 +300,18 @@ fn main() {
                         }
                     }
 
-                    if game.turn != server.own_color {
+                    if game.whites_turn_to_move != server.own_color_is_white {
                         if let Some(pmove) = server.receive_move() { // listen
                             // Receive a move
                             println!("Move recevied:\n From: ({}, {})\n To: ({}, {})\n Forfeit: {}\n Offer draw: {}", pmove.from.0, pmove.from.1, pmove.to.0, pmove.to.1, pmove.forfeit, pmove.offer_draw);
 
                             if pmove.forfeit {
-                                game.declare_win(server.own_color);
+                                game.result = if server.own_color_is_white {ChessResult::WhiteWon} else {ChessResult::BlackWon};
                                 server.send_ack(true, Some(GameState::CheckMate));
                                 server.network_phase = NetworkPhase::GameOver;
                             } else if pmove.offer_draw {
                                 was_offered_draw = true;
-                            } else if game.do_move(&to_square(&pmove.from), &to_square(&pmove.to)) {
+                            } else if game.do_move(&selected_piece, to_square(&pmove.to)) {
                                 if game.promotion {
                                     match pmove.promotion {
                                         Some(promotion) => _ = game.pawn_promotion(match promotion {
@@ -353,7 +347,7 @@ fn main() {
                             server.send_move((0, 0), (0, 0), None, true, false);
                         }
                     }
-                    can_move = game.turn == server.own_color; // allow the making of moves if it is own turn
+                    can_move = game.whites_turn_to_move == server.own_color_is_white; // allow the making of moves if it is own turn
                 }
                 NetworkPhase::Ack => { // listen for an ack response after a move was made
                     if let Some(ack) = server.receive_ack() {
@@ -525,7 +519,7 @@ fn main() {
         if !pre_game && can_move && square_x >= 0.0 && square_x <= 7.0 && square_y >= 0.0 && square_y <= 7.0 &&
             rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
                 
-            let square = Square::from((mirror(square_x as i8, rotated), mirror(square_y as i8, !rotated)));
+            let square = (mirror(square_x as i32, rotated), mirror(square_y as i32, rotated));
             if !game.promotion && !promotion_network {
                 if positions.contains(&square) {
                     if let Some(server) = chess_server.as_mut() {   // server
@@ -716,73 +710,73 @@ fn main() {
         }
 
         // promotion
-        if game.promotion || promotion_network {
-            let y = match game.turn == PieceColor::White && !rotated || game.turn == PieceColor::Black && rotated {
-                true => 6,
-                false => 4,
-            };
+        // if game.promotion || promotion_network {
+        //     let y = match game.turn == PieceColor::White && !rotated || game.turn == PieceColor::Black && rotated {
+        //         true => 6,
+        //         false => 4,
+        //     };
 
-            let x = if let Some(server) = &chess_server {
-                if let Some(saved_move) = &server.saved_move {
-                    saved_move.to.0 as i8
-                }
-                else {
-                    game.last_moved_to.x
-                }
-            } else if let Some(client) = &chess_client {
-                if let Some(saved_move) = &client.saved_move {
-                    saved_move.to.0 as i8
-                } else {
-                    game.last_moved_to.x
-                }
-            } else { game.last_moved_to.x };
+        //     let x = if let Some(server) = &chess_server {
+        //         if let Some(saved_move) = &server.saved_move {
+        //             saved_move.to.0 as i8
+        //         }
+        //         else {
+        //             game.last_moved_to.x
+        //         }
+        //     } else if let Some(client) = &chess_client {
+        //         if let Some(saved_move) = &client.saved_move {
+        //             saved_move.to.0 as i8
+        //         } else {
+        //             game.last_moved_to.x
+        //         }
+        //     } else { game.last_moved_to.x };
 
-            // draw outline
-            d.draw_texture_pro(&assets.board, Rectangle::new(
-                (assets.square_offset + assets.square_size) as f32,
-                assets.square_offset as f32, 1.0, 1.0),
-                Rectangle::new(
-                    board_left + board_square_size * (mirror(x, rotated) as f32 + 0.5) - scale * 2.0,
-                    board_top + board_square_size * (mirror(y, true) as f32 + 0.5) - scale * 2.0,
-                    board_square_size + scale * 4.0, board_square_size * 4.0 + scale * 4.0),
-                Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
+        //     // draw outline
+        //     d.draw_texture_pro(&assets.board, Rectangle::new(
+        //         (assets.square_offset + assets.square_size) as f32,
+        //         assets.square_offset as f32, 1.0, 1.0),
+        //         Rectangle::new(
+        //             board_left + board_square_size * (mirror(x, rotated) as f32 + 0.5) - scale * 2.0,
+        //             board_top + board_square_size * (mirror(y, true) as f32 + 0.5) - scale * 2.0,
+        //             board_square_size + scale * 4.0, board_square_size * 4.0 + scale * 4.0),
+        //         Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
 
-            // draw inside outline
-            d.draw_texture_pro(&assets.board, Rectangle::new(
-                assets.square_offset as f32,
-                assets.square_offset as f32, 1.0, 1.0),
-                Rectangle::new(
-                    board_left + board_square_size * (mirror(x, rotated) as f32 + 0.5),
-                    board_top + board_square_size * (mirror(y, true) as f32 + 0.5),
-                    board_square_size, board_square_size * 4.0),
-                Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
+        //     // draw inside outline
+        //     d.draw_texture_pro(&assets.board, Rectangle::new(
+        //         assets.square_offset as f32,
+        //         assets.square_offset as f32, 1.0, 1.0),
+        //         Rectangle::new(
+        //             board_left + board_square_size * (mirror(x, rotated) as f32 + 0.5),
+        //             board_top + board_square_size * (mirror(y, true) as f32 + 0.5),
+        //             board_square_size, board_square_size * 4.0),
+        //         Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
 
-            // draw inside
-            d.draw_texture_pro(&assets.board, Rectangle::new(
-                (assets.square_offset + 2) as f32,
-                (assets.square_offset + 2) as f32, 1.0, 1.0),
-                Rectangle::new(
-                    board_left + board_square_size * (mirror(x, rotated) as f32 + 0.5) + scale * 2.0,
-                    board_top + board_square_size * (mirror(y, true) as f32 + 0.5) + scale * 2.0,
-                    board_square_size - scale * 4.0, board_square_size * 4.0 - scale * 4.0),
-                Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
+        //     // draw inside
+        //     d.draw_texture_pro(&assets.board, Rectangle::new(
+        //         (assets.square_offset + 2) as f32,
+        //         (assets.square_offset + 2) as f32, 1.0, 1.0),
+        //         Rectangle::new(
+        //             board_left + board_square_size * (mirror(x, rotated) as f32 + 0.5) + scale * 2.0,
+        //             board_top + board_square_size * (mirror(y, true) as f32 + 0.5) + scale * 2.0,
+        //             board_square_size - scale * 4.0, board_square_size * 4.0 - scale * 4.0),
+        //         Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
 
-            // draw pieces
-            let textures: [(&Texture2D, i8); 4] = match game.turn {
-                PieceColor::White => [(&assets.white_queen, 1), (&assets.white_rook, 2), (&assets.white_bishop, 3), (&assets.white_knight, 4)],
-                PieceColor::Black => [(&assets.black_queen, 6), (&assets.black_rook, 5), (&assets.black_bishop, 4), (&assets.black_knight, 3)],
-            };
-            let source_rec = Rectangle::new(0.0, 0.0, asset_square_size, asset_square_size);
+        //     // draw pieces
+        //     let textures: [(&Texture2D, i32); 4] = match game.turn {
+        //         PieceColor::White => [(&assets.white_queen, 1), (&assets.white_rook, 2), (&assets.white_bishop, 3), (&assets.white_knight, 4)],
+        //         PieceColor::Black => [(&assets.black_queen, 6), (&assets.black_rook, 5), (&assets.black_bishop, 4), (&assets.black_knight, 3)],
+        //     };
+        //     let source_rec = Rectangle::new(0.0, 0.0, asset_square_size, asset_square_size);
 
-            for (piece_texture, y) in textures {
-                d.draw_texture_pro(piece_texture, source_rec,
-                    Rectangle::new(
-                        board_left + board_square_size * (mirror(x, rotated) as f32 + 0.5),
-                        board_top + board_square_size * (mirror(y, rotated) as f32 + 0.5),
-                        board_square_size, board_square_size),
-                    Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
-            }
-        }
+        //     for (piece_texture, y) in textures {
+        //         d.draw_texture_pro(piece_texture, source_rec,
+        //             Rectangle::new(
+        //                 board_left + board_square_size * (mirror(x, rotated) as f32 + 0.5),
+        //                 board_top + board_square_size * (mirror(y, rotated) as f32 + 0.5),
+        //                 board_square_size, board_square_size),
+        //             Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
+        //     }
+        // }
 
         // cursor
         if d.is_cursor_on_screen() {
@@ -995,7 +989,7 @@ impl UIButton {
 struct ChessServer {
     listener: TcpListener,
     stream: Option<TcpStream>,
-    own_color: PieceColor,
+    own_color_is_white: bool,
     name: Option<String>,
     network_phase: NetworkPhase,
     saved_move: Option<Move>,
@@ -1013,11 +1007,11 @@ impl ChessServer {
 
         let stream = None;
 
-        let own_color = PieceColor::White;
+        let own_color_is_white = true;
         let network_phase = NetworkPhase::NoConnection;
         let last_move = None;
 
-        Some(Self { listener, stream, own_color, name, network_phase, saved_move: last_move })
+        Some(Self { listener, stream, own_color_is_white, name, network_phase, saved_move: last_move })
     }
 
     fn listen(&mut self) {
@@ -1047,7 +1041,7 @@ impl ChessServer {
 
     fn send_start(&mut self, fen: Option<String>) {
         let start = Start {
-            is_white: self.own_color != PieceColor::White,
+            is_white: !self.own_color_is_white,
             name: self.name.clone(),
             fen: fen,
             time: None,
@@ -1184,7 +1178,7 @@ impl ChessServer {
 
 struct ChessClient {
     stream: TcpStream,
-    own_color: PieceColor,
+    own_color_is_white: bool,
     name: Option<String>,
     network_phase: NetworkPhase,
     saved_move: Option<Move>,
@@ -1198,11 +1192,11 @@ impl ChessClient {
         };
         stream.set_nonblocking(true).unwrap();
 
-        let own_color = PieceColor::Black;
+        let own_color_is_white = false;
         let network_phase = NetworkPhase::FoundConnection;
         let last_move = None;
 
-        Some(Self { stream, own_color, name, network_phase, saved_move: last_move })
+        Some(Self { stream, own_color_is_white, name, network_phase, saved_move: last_move })
     }
 
     //fn new_a(address: &String, port: u16, name: Option<String>) -> Option<Self> {
@@ -1212,7 +1206,7 @@ impl ChessClient {
 
     fn send_start(&mut self) {
         let start = Start {
-            is_white: self.own_color == PieceColor::White,
+            is_white: self.own_color_is_white,
             name: self.name.clone(),
             fen: None,
             time: None,
@@ -1328,105 +1322,130 @@ enum NetworkPhase {
     GameOver,
 }
 
-fn to_square(pos: &(u8, u8)) -> Square {
-    Square { x: pos.0 as i8, y: pos.1 as i8 }
+fn to_square(pos: &(u8, u8)) -> (i32, i32) {
+    (pos.0 as i32, mirror(pos.1 as i32, true))
 }
 
-fn complete_move(game: &mut Game, pmove: &Move) -> bool {
-    if !game.do_move(&to_square(&pmove.from), &to_square(&pmove.to)) {
-        return false
-    }
+fn complete_move(game: &mut ChessEngine, pmove: &Move) -> bool {
+    let piece = game.get_piece(to_square(&pmove.from));
 
-    if game.promotion {
-        game.pawn_promotion(if let Some(promotion_piece) = &pmove.promotion {
-            match promotion_piece {
-                PromotionPiece::Queen => PieceType::Queen,
-                PromotionPiece::Bishop => PieceType::Bishop,
-                PromotionPiece::Knight => PieceType::Knight,
-                PromotionPiece::Rook => PieceType::Rook,
-            }
-        }
-        else {
-            // no promotion_piece was supplied, defaulting to queen
-            println!("no promotion_piece was supplied, defaulting to queen");
-            PieceType::Queen
-        });
-            
+    if !game.do_move(&piece, to_square(&pmove.to)) {
+        return false
     }
     true
 }
 
-struct UIBox {
-    x: f32,
-    y: f32,
-
-    text: String,
-    font_size: i32,
-    text_color: Color,
-    width: f32,
-    height: f32,
-    color: Color,
-    outline_color: Color,
-    buttons: Vec<UIButton>
+#[derive(PartialEq)]
+enum ChessResult {
+    Ongoing,
+    WhiteWon,
+    BlackWon,
+    Draw
 }
 
-impl UIElement for UIBox {
-    fn draw(&self, d: &mut RaylibDrawHandle, origin: Vector2, scale: f32) {
-        d.draw_rectangle_rec(Rectangle::new(origin.x + (self.x - self.width / 2.0) * scale, origin.y + (self.y - self.height / 2.0) * scale, self.width * scale, self.height * scale), self.color);
-        d.draw_rectangle_lines_ex(Rectangle::new(origin.x + (self.x - self.width / 2.0) * scale, origin.y + (self.y - self.height / 2.0) * scale, self.width * scale, self.height * scale), scale * 2.0, self.outline_color);
-    
-        let text_width = d.measure_text(&self.text, self.font_size) as f32;
+struct ChessEngine {
+    board: Vec<Vec<String>>,
+    whites_turn_to_move: bool,
+    result: ChessResult,
+}
 
-        d.draw_text(&self.text,
-            (origin.x + (self.x - text_width / 2.0) * scale) as i32,
-            (origin.y + (self.y - self.height as f32 / 2.0) * scale) as i32,
-            (self.font_size as f32 * scale) as i32, self.text_color);
+impl ChessEngine {
+    fn new() -> Self {
+        // Create pieces
+        let black_pieces: Vec<&str> = vec![
+            "bR1", "bK1", "bB1", "bQU", "bKI", "bB2", "bK2", "bR2", 
+            "bP1", "bP2", "bP3", "bP4", "bP5", "bP6", "bP7", "bP8"
+        ];
+        
+        let white_pieces: Vec<&str> = vec![
+            "wR1", "wK1", "wB1", "wQU", "wKI", "wB2", "wK2", "wR2", 
+            "wP1", "wP2", "wP3", "wP4", "wP5", "wP6", "wP7", "wP8"
+        ];
 
-        for button in &self.buttons {
-            button.draw(d, origin + Vector2::new(self.x, self.y), scale);
+        // Set turn order
+        let whites_turn_to_move = true;
+
+        // Initilize board
+        let mut board: Vec<Vec<String>> = vec![vec!["   ".to_string(); 8]; 8];
+        for i in 0..8{
+            board[0][i] = black_pieces.get(i)
+            .expect("Piece at index {i} does not exist in white_pieces").to_string();
+            board[1][i] = black_pieces.get(i + 8)
+            .expect("Piece at index {i} does not exist in white_pieces").to_string();
+        }
+
+        for i in 0..8{
+            board[7][i] = white_pieces.get(i)
+            .expect("Piece at index {i} does not exist in white_pieces").to_string();
+            board[6][i] = white_pieces.get(i + 8)
+            .expect("Piece at index {i} does not exist in white_pieces").to_string();
+        }
+        let result = ChessResult::Ongoing;
+
+        Self {
+            board,
+            whites_turn_to_move,
+            result,
         }
     }
-}
 
-struct UIButton {
-    x: f32,
-    y: f32,
-
-    text: String,
-    font_size: i32,
-    text_color: Color,
-    width: f32,
-    height: f32,
-    color: Color,
-    outline_color: Color,
-}
-
-pub trait UIElement {
-    fn draw(&self, d: &mut RaylibDrawHandle, origin: Vector2, scale: f32);
-}
-
-impl UIElement for UIButton {
-    fn draw(&self, d: &mut RaylibDrawHandle, origin: Vector2, scale: f32) {
-        d.draw_rectangle_rec(Rectangle::new(origin.x + (self.x - self.width / 2.0) * scale, origin.y + (self.y - self.height / 2.0) * scale, self.width * scale, self.height * scale), self.color);
-        d.draw_rectangle_lines_ex(Rectangle::new(origin.x + (self.x - self.width / 2.0) * scale, origin.y + (self.y - self.height / 2.0) * scale, self.width * scale, self.height * scale), scale * 2.0, self.outline_color);
+    fn get_valid_pieces(&self) -> Vec<String> {
+        //Checking which pieces can be moved
         
-        let text_width = d.measure_text(&self.text, self.font_size) as f32;
+        let is_in_check = valid_moves::is_in_check(if self.whites_turn_to_move { "wKI" } else { "bKI" }, &self.board);
 
-        d.draw_text(&self.text,
-            (origin.x + (self.x - text_width / 2.0) * scale) as i32,
-            (origin.y + (self.y - self.font_size as f32 / 2.0) * scale) as i32,
-            (self.font_size as f32 * scale) as i32, self.text_color);
+        valid_pieces(self.whites_turn_to_move, &self.board, is_in_check)
     }
-}
 
-impl UIButton {
-    fn is_hovered(&self, origin: Vector2, scale: f32, mouse_x: f32, mouse_y: f32) -> bool {
-        let left = origin.x + (self.x - self.width / 2.0) * scale;
-        let right = left + self.width * scale;
+    fn get_valid_moves(&self, piece_to_move: &String) -> Vec<String> {
 
-        let top = origin.y + (self.y - self.height / 2.0) * scale;
-        let bottom = top + self.height * scale;
+        let avaliable_pieces = self.get_valid_pieces();
         
-        left < mouse_x && mouse_x < right && top < mouse_y && mouse_y < bottom
+        let is_in_check = valid_moves::is_in_check(if self.whites_turn_to_move { "wKI" } else { "bKI" }, &self.board);
+        
+        if !avaliable_pieces.contains(piece_to_move) {
+            return Vec::new();
+        }
+
+        //If check -> filter out positions that do not solve check
+        let moves = valid_moves(piece_to_move.as_str(), &self.board);
+
+        if is_in_check {
+            moves.iter().filter(|m| valid_moves::solves_check_move(piece_to_move, &self.board, m.to_string())).cloned().collect::<Vec<String>>()
+        } else {
+            moves
+        }
+    }
+
+    fn do_move(&mut self, piece: &String, to: (i32, i32)) -> bool {
+        let to = index_to_letter((to.1, to.0));
+
+        println!("{}", to);
+        
+        let valid_moves = self.get_valid_moves(piece);
+        if !valid_moves.contains(&to) {
+            return false;
+        }
+
+        //Moving piece
+        let move_from = get_position_index(piece, &self.board);
+        let move_to = letter_to_index(to.as_str());
+        self.board[move_from.0 as usize][move_from.1 as usize] = "   ".to_string();
+        self.board[move_to.0 as usize][move_to.1 as usize] = piece.clone();    
+    
+    
+        //Change turns
+        self.whites_turn_to_move = !self.whites_turn_to_move;
+
+        // calculate checkmate
+        if self.get_valid_pieces().len() == 0 {
+            self.result = if self.whites_turn_to_move { ChessResult::BlackWon } else { ChessResult::WhiteWon};
+        }
+
+        true
+    }
+
+    fn get_piece(&self, (x, y): (i32, i32)) -> String {
+        self.board[y as usize][x as usize].clone()
     }
 }
