@@ -70,6 +70,8 @@ fn main() {
 
     let mut opponent_name = String::new();
     let mut was_offered_draw = false;
+    let mut promotion_network = false;
+    let mut promotion_x = -1;
 
     while !rl.window_should_close() {
         
@@ -179,7 +181,6 @@ fn main() {
         
         // network phases
         let mut can_move = true;
-        let mut promotion = false;
         if let Some(server) = &mut chess_server {
             can_move = false;
             match server.network_phase {
@@ -192,21 +193,27 @@ fn main() {
                     if let Some(start) = server.receive_start() {
                         if let Some(op_name) = start.name {
                             opponent_name = op_name;
+                            println!("Opponent name: {opponent_name}");
                         }
 
                         server.send_start();
 
-                        server.network_phase = match server.own_color {
-                            PieceColor::White => NetworkPhase::Move,
-                            PieceColor::Black => NetworkPhase::Ack,
-                        };
+                        server.network_phase = NetworkPhase::Move;
 
+                        rotated = server.own_color == PieceColor::Black;
+
+                        println!("My color: {}", match server.own_color {
+                            PieceColor::White => "White",
+                            PieceColor::Black => "Black",
+                        });
                     }
                 },
                 NetworkPhase::Move => { // make a move or listen for one
                     if game.turn != server.own_color {
                         if let Some(pmove) = server.receive_move() { // listen
                             // Receive a move
+                            println!("Move recevied:\n From: ({}, {})\n To: ({}, {})\n Forfeit: {}\n Offer draw: {}", pmove.from.0, pmove.from.1, pmove.to.0, pmove.to.1, pmove.forfeit, pmove.offer_draw);
+
                             if pmove.forfeit {
                                 game.declare_win(server.own_color);
                                 todo!();
@@ -244,6 +251,9 @@ fn main() {
                 }
                 NetworkPhase::Ack => { // listen for an ack response after a move was made
                     if let Some(ack) = server.receive_ack() {
+                        // ack received
+                        println!("Ack recevied:\n Ok: {}\n End state: {}", ack.ok, match ack.end_state { Some(end_state) => match end_state { GameState::CheckMate => "Checkmate", GameState::Draw => "Draw", }, None => "None" });
+
                         if let Some(saved_move) = &server.saved_move {
                             if saved_move.forfeit { // forfeit
                                 game.declare_win(!server.own_color);
@@ -266,6 +276,11 @@ fn main() {
                                 }
                             }
                         }
+
+                        server.network_phase = match game.result {
+                            ChessResult::Ongoing => NetworkPhase::Move,
+                            _ => NetworkPhase::GameOver,
+                        }
                     }
                 }
                 NetworkPhase::GameOver => (),
@@ -279,6 +294,7 @@ fn main() {
                     if let Some(start) = client.receive_start() {
                         if let Some(op_name) = start.name {
                             opponent_name = op_name;
+                            println!("Opponent name: {opponent_name}");
                         }
                         client.own_color = if start.is_white { PieceColor::White } else { PieceColor::Black };
 
@@ -286,15 +302,22 @@ fn main() {
                             game = Game::from_fen(&fen);
                         }
 
-                        client.network_phase = match client.own_color {
-                            PieceColor::White => NetworkPhase::Move,
-                            PieceColor::Black => NetworkPhase::Ack,
-                        };
+                        client.network_phase = NetworkPhase::Move;
+
+                        rotated = client.own_color == PieceColor::Black;
+
+                        println!("My color: {}", match client.own_color {
+                            PieceColor::White => "White",
+                            PieceColor::Black => "Black",
+                        });
                     }
                 },
                 NetworkPhase::Move => { // make move or listen for one depending on turn
                     if game.turn != client.own_color {
                         if let Some(pmove) = client.receive_move() { // listen
+                            // move received
+                            println!("Move recevied:\n From: ({}, {})\n To: ({}, {})\n Forfeit: {}\n Offer draw: {}", pmove.from.0, pmove.from.1, pmove.to.0, pmove.to.1, pmove.forfeit, pmove.offer_draw);
+
                             if pmove.forfeit {
                                 game.declare_win(client.own_color);
                                 client.send_ack(true, Some(GameState::CheckMate));
@@ -332,6 +355,9 @@ fn main() {
                 },
                 NetworkPhase::Ack => { // listen for an ack response after a move was made
                     if let Some(ack) = client.receive_ack() {
+                        // ack received
+                        println!("Ack recevied:\n Ok: {}\n End state: {}", ack.ok, match ack.end_state { Some(end_state) => match end_state { GameState::CheckMate => "Checkmate", GameState::Draw => "Draw", }, None => "None" });
+
                         if let Some(saved_move) = &client.saved_move {
                             if saved_move.forfeit { // forfeit
                                 game.declare_win(!client.own_color);
@@ -354,6 +380,11 @@ fn main() {
                                 }
                             }
                         }
+
+                        client.network_phase = match game.result {
+                            ChessResult::Ongoing => NetworkPhase::Move,
+                            _ => NetworkPhase::GameOver,
+                        }
                     }
                 }
                 NetworkPhase::GameOver => (),
@@ -366,15 +397,45 @@ fn main() {
             rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
                 
             let square = Square::from((mirror(square_x as i8, rotated), mirror(square_y as i8, !rotated)));
-            if !game.promotion {
+            if !game.promotion && !promotion_network {
                 if positions.contains(&square) {
-                    game.do_move(&selected_square, &square);
-                    if !game.promotion {
-                        if let Some(server) = chess_server.as_mut() {
-                            server.send_move(
-                                (selected_square.x as u8, selected_square.y as u8),
-                                (square.x as u8, square.y as u8), None, false, false);
+                    if let Some(server) = chess_server.as_mut() {   // server
+                        let (result, promotion, legal) = game.try_move(&selected_square, &square);
+
+                        if legal {
+                            if promotion {
+                                promotion_network = true;
+                                promotion_x = square.x;
+                                server.saved_move = Some(Move { 
+                                    from: (selected_square.x as u8, selected_square.y as u8),
+                                    to: (square.x as u8, square.y as u8),
+                                    promotion: None, forfeit: false, offer_draw: false });
+                            } else {
+                                server.send_move(
+                                    (selected_square.x as u8, selected_square.y as u8),
+                                    (square.x as u8, square.y as u8), None, false, false);
+                            }
                         }
+                    } else if let Some(client) = chess_client.as_mut() { // client
+                        let (result, promotion, legal) = game.try_move(&selected_square, &square);
+
+                        if legal {
+                            if promotion {
+                                promotion_network = true;
+                                promotion_x = square.x;
+                                client.saved_move = Some(Move { 
+                                    from: (selected_square.x as u8, selected_square.y as u8),
+                                    to: (square.x as u8, square.y as u8),
+                                    promotion: None, forfeit: false, offer_draw: false });
+                            } else {
+                                client.send_move(
+                                    (selected_square.x as u8, selected_square.y as u8),
+                                    (square.x as u8, square.y as u8), None, false, false);
+                            }
+                        }
+
+                    } else { // offline
+                        game.do_move(&selected_square, &square);
                     }
                     positions.clear();
                     selected_square = Square::from((-1, -1));
@@ -383,26 +444,90 @@ fn main() {
                     positions = game.get_moves_list(&square);
                 }
             }
-            else if square.x == game.last_moved_to.x { // promotion
+            else if square.x == game.last_moved_to.x || promotion_network && square.x == promotion_x { // promotion && clicked on piece in promotion window
 
-                let distance_to_pawn = if game.last_moved_to.y > square.y {
-                    game.last_moved_to.y - square.y
-                } else {
-                    square.y - game.last_moved_to.y
+                let y = match game.turn {
+                    PieceColor::White => 7,
+                    PieceColor::Black => 0,
                 };
 
-                if square.y <= match game.last_moved_to.y { 0 => 4, 7 => 6, _ => -1 } &&
-                    square.y >= match game.last_moved_to.y { 0 => 1, 7 => 3, _ => 100 } {
+                let distance_to_pawn = if y > square.y {
+                    y - square.y
+                } else {
+                    square.y - y
+                };
+
+                if square.y <= match y { 0 => 4, 7 => 6, _ => -1 } &&
+                    square.y >= match y { 0 => 1, 7 => 3, _ => 100 } {
                     
-                    _ = match distance_to_pawn { // returns true if successful (play sound?)
-                        1 => game.pawn_promotion(PieceType::Queen),
-                        2 => game.pawn_promotion(PieceType::Rook),
-                        3 => game.pawn_promotion(PieceType::Bishop),
-                        4 => game.pawn_promotion(PieceType::Knight),
-                        _ => false,
+                    let promotion_piece = match distance_to_pawn { // returns true if successful (play sound?)
+                        1 => Some(PieceType::Queen),
+                        2 => Some(PieceType::Rook),
+                        3 => Some(PieceType::Bishop),
+                        4 => Some(PieceType::Knight),
+                        _ => None, // Invalid
                     };
+
+                    if let Some(promotion_piece) = promotion_piece {
+                        // play sound?
+                        // do promotion
+                        if promotion_network { // networked promotion
+                            let promotion_piece = match promotion_piece {
+                                PieceType::Queen => Some(PromotionPiece::Queen),
+                                PieceType::Bishop => Some(PromotionPiece::Bishop),
+                                PieceType::Knight => Some(PromotionPiece::Knight),
+                                PieceType::Rook => Some(PromotionPiece::Rook),
+                                _ => Some(PromotionPiece::Queen),
+                            };
+
+                            if let Some(server) = chess_server.as_mut() {
+                                if let Some(saved_move) = &server.saved_move {
+                                    server.send_move(saved_move.from, saved_move.to, promotion_piece, saved_move.forfeit, saved_move.offer_draw)
+                                }
+                            } else if let Some(client) = chess_client.as_mut() {
+                                if let Some(saved_move) = &client.saved_move {
+                                    client.send_move(saved_move.from, saved_move.to, promotion_piece, saved_move.forfeit, saved_move.offer_draw)
+                                }
+                            }
+                            promotion_network = false;
+                            promotion_x = -1;
+                        }
+                        else {  // offline
+                            game.pawn_promotion(promotion_piece);
+                        }
+                    }
                 }
             }
+        }
+
+        if rl.is_key_pressed(KeyboardKey::KEY_D) {
+            let mut phase = "x";
+            if let Some(server) = &chess_server {
+                phase = match server.network_phase {
+                    NetworkPhase::NoConnection => "NoConnection",
+                    NetworkPhase::FoundConnection => "FoundConnection",
+                    NetworkPhase::Start => "Start",
+                    NetworkPhase::Move => "Move",
+                    NetworkPhase::Ack => "Ack",
+                    NetworkPhase::GameOver => "GameOver",
+                }
+            }
+            if let Some(client) = &chess_client {
+                phase = match client.network_phase {
+                    NetworkPhase::NoConnection => "NoConnection",
+                    NetworkPhase::FoundConnection => "FoundConnection",
+                    NetworkPhase::Start => "Start",
+                    NetworkPhase::Move => "Move",
+                    NetworkPhase::Ack => "Ack",
+                    NetworkPhase::GameOver => "GameOver",
+                }
+            }
+            let turn = match game.turn {
+                PieceColor::White => "White",
+                PieceColor::Black => "Black",
+            };
+            
+            println!("DEBUG INFO:\n Phase: {phase}\n Turn: {turn}\n ",);
         }
 
         // ------- Draw ------------------------------------------
@@ -468,19 +593,33 @@ fn main() {
         }
 
         // promotion
-        if game.promotion {
-            let y = match mirror(game.last_moved_to.y, rotated) {
-                7 => 6,
-                0 => 4,
-                _ => 100, // this should never happen
+        if game.promotion || promotion_network {
+            let y = match game.turn == PieceColor::White && !rotated || game.turn == PieceColor::Black && rotated {
+                true => 6,
+                false => 4,
             };
+
+            let x = if let Some(server) = &chess_server {
+                if let Some(saved_move) = &server.saved_move {
+                    saved_move.to.0 as i8
+                }
+                else {
+                    game.last_moved_to.x
+                }
+            } else if let Some(client) = &chess_client {
+                if let Some(saved_move) = &client.saved_move {
+                    saved_move.to.0 as i8
+                } else {
+                    game.last_moved_to.x
+                }
+            } else { game.last_moved_to.x };
 
             // draw outline
             d.draw_texture_pro(&assets.board, Rectangle::new(
                 (assets.square_offset + assets.square_size) as f32,
                 assets.square_offset as f32, 1.0, 1.0),
                 Rectangle::new(
-                    board_left + board_square_size * (mirror(game.last_moved_to.x, rotated) as f32 + 0.5) - scale * 2.0,
+                    board_left + board_square_size * (mirror(x, rotated) as f32 + 0.5) - scale * 2.0,
                     board_top + board_square_size * (mirror(y, true) as f32 + 0.5) - scale * 2.0,
                     board_square_size + scale * 4.0, board_square_size * 4.0 + scale * 4.0),
                 Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
@@ -490,7 +629,7 @@ fn main() {
                 assets.square_offset as f32,
                 assets.square_offset as f32, 1.0, 1.0),
                 Rectangle::new(
-                    board_left + board_square_size * (mirror(game.last_moved_to.x, rotated) as f32 + 0.5),
+                    board_left + board_square_size * (mirror(x, rotated) as f32 + 0.5),
                     board_top + board_square_size * (mirror(y, true) as f32 + 0.5),
                     board_square_size, board_square_size * 4.0),
                 Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
@@ -500,7 +639,7 @@ fn main() {
                 (assets.square_offset + 2) as f32,
                 (assets.square_offset + 2) as f32, 1.0, 1.0),
                 Rectangle::new(
-                    board_left + board_square_size * (mirror(game.last_moved_to.x, rotated) as f32 + 0.5) + scale * 2.0,
+                    board_left + board_square_size * (mirror(x, rotated) as f32 + 0.5) + scale * 2.0,
                     board_top + board_square_size * (mirror(y, true) as f32 + 0.5) + scale * 2.0,
                     board_square_size - scale * 4.0, board_square_size * 4.0 - scale * 4.0),
                 Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
@@ -515,7 +654,7 @@ fn main() {
             for (piece_texture, y) in textures {
                 d.draw_texture_pro(piece_texture, source_rec,
                     Rectangle::new(
-                        board_left + board_square_size * (mirror(game.last_moved_to.x, rotated) as f32 + 0.5),
+                        board_left + board_square_size * (mirror(x, rotated) as f32 + 0.5),
                         board_top + board_square_size * (mirror(y, rotated) as f32 + 0.5),
                         board_square_size, board_square_size),
                     Vector2::new(board_square_size / 2.0, board_square_size / 2.0), 0.0, Color::WHITE);
@@ -780,7 +919,7 @@ impl ChessServer {
 
     fn send_start(&mut self) {
         let start = Start {
-            is_white: self.own_color == PieceColor::White,
+            is_white: self.own_color != PieceColor::White,
             name: self.name.clone(),
             fen: None,
             time: None,
@@ -815,6 +954,8 @@ impl ChessServer {
         self.saved_move = Some(pmove);
 
         stream.write_all(&mut buf).unwrap();
+
+        self.network_phase = NetworkPhase::Ack;
     }
 
     fn send_ack(&mut self, ok: bool, end_state: Option<GameState>) {
@@ -962,9 +1103,13 @@ impl ChessClient {
             offer_draw,
         };
 
-        let mut buf = Vec::<u8>::try_from(pmove).unwrap();
+        let mut buf = Vec::<u8>::try_from(pmove.clone()).unwrap();
+
+        self.saved_move = Some(pmove);
 
         self.stream.write_all(&mut buf).unwrap();
+
+        self.network_phase = NetworkPhase::Ack;
     }
 
     fn send_ack(&mut self, ok: bool, end_state: Option<GameState>) {
